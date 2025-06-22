@@ -4,6 +4,5 @@ run:
 build:
     zig build
 
-
 lint:
-    zig fmt
+    zig fmt .
