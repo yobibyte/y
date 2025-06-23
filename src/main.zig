@@ -6,7 +6,18 @@ pub fn enable_raw_mode(handle: std.posix.fd_t) !void {
     orig_term = try std.posix.tcgetattr(handle);
     var term = orig_term;
     term.lflag.ECHO = !term.lflag.ECHO;
+    term.lflag.ISIG = !term.lflag.ISIG;
     term.lflag.ICANON = !term.lflag.ICANON;
+    term.lflag.IEXTEN = !term.lflag.IEXTEN;
+    term.iflag.IXON = !term.iflag.IXON;
+    term.iflag.ICRNL = !term.iflag.ICRNL;
+    term.iflag.BRKINT = !term.iflag.BRKINT;
+    term.iflag.INPCK = !term.iflag.INPCK;
+    term.iflag.ISTRIP = !term.iflag.ISTRIP;
+    term.oflag.OPOST = !term.oflag.OPOST;
+    term.cflag.CSIZE = std.posix.CSIZE.CS8;
+    term.cc[@intFromEnum(std.posix.V.MIN)] = 0;
+    term.cc[@intFromEnum(std.posix.V.TIME)] = 1;
     try std.posix.tcsetattr(handle, .NOW, term);
 }
 pub fn disable_raw_mode(handle: std.posix.fd_t) !void {
@@ -22,17 +33,22 @@ pub fn main() !void {
         std.debug.print("Error: {} when setting the terminal flags back to original", .{err});
     };
     while (true) {
-        const c = reader.readByte() catch |err| {
-            if (err == error.EndOfStream) break;
-            return err;
-        };
+        var c: u8 = 0;
+        if (reader.readByte()) |b| {
+            c = b;
+        } else |err| switch (err) {
+            error.EndOfStream => {
+                c = 0;
+            },
+            else => |other_err| return other_err,
+        }
         if (c == 'q') {
             return;
         }
         if (std.ascii.isControl(c)) {
-            std.debug.print("{}\n", .{c});
+            std.debug.print("{}\r\n", .{c});
         } else {
-            std.debug.print("{} ('{c}')\n", .{ c, c });
+            std.debug.print("{} ('{c}')\r\n", .{ c, c });
         }
     }
 }
