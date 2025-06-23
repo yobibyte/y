@@ -29,5 +29,10 @@ pub fn main() !void {
         if (c == 'q') {
             return;
         }
+        if (std.ascii.isControl(c)) {
+            std.debug.print("{}\n", .{c});
+        } else {
+            std.debug.print("{} ('{c}')\n", .{ c, c });
+        }
     }
 }
