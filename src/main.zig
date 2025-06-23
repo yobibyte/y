@@ -6,6 +6,7 @@ pub fn enable_raw_mode(handle: std.posix.fd_t) !void {
     orig_term = try std.posix.tcgetattr(handle);
     var term = orig_term;
     term.lflag.ECHO = !term.lflag.ECHO;
+    term.lflag.ICANON = !term.lflag.ICANON;
     try std.posix.tcsetattr(handle, .NOW, term);
 }
 pub fn disable_raw_mode(handle: std.posix.fd_t) !void {
@@ -19,7 +20,7 @@ pub fn main() !void {
     try enable_raw_mode(handle);
     defer disable_raw_mode(handle) catch |err| {
         std.debug.print("Error: {} when setting the terminal flags back to original", .{err});
-    }; 
+    };
     while (true) {
         const c = reader.readByte() catch |err| {
             if (err == error.EndOfStream) break;
