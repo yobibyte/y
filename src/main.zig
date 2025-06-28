@@ -20,8 +20,15 @@ pub fn enable_raw_mode(handle: std.posix.fd_t) !void {
     term.cc[@intFromEnum(std.posix.V.TIME)] = 1;
     try std.posix.tcsetattr(handle, .NOW, term);
 }
+
 pub fn disable_raw_mode(handle: std.posix.fd_t) !void {
     try std.posix.tcsetattr(handle, .NOW, orig_term);
+}
+
+pub fn die(s: []const u8) void {
+    // Replace this by spitting out the error itself.
+    std.debug.print("{}", .{s});
+    std.os.exit(1);
 }
 
 pub fn main() !void {
