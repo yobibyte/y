@@ -2,6 +2,10 @@ const std = @import("std");
 
 var orig_term: std.posix.system.termios = undefined;
 
+inline fn ctrl_key(k: u8) u8 {
+    return k & 0x1f;
+}
+
 pub fn enable_raw_mode(handle: std.posix.fd_t) !void {
     orig_term = try std.posix.tcgetattr(handle);
     var term = orig_term;
@@ -47,8 +51,8 @@ pub fn main() !void {
             },
             else => |other_err| die(other_err),
         }
-        if (c == 'q') {
-            return;
+        if (c == ctrl_key('q')) {
+            break;
         }
         if (std.ascii.isControl(c)) {
             std.debug.print("{}\r\n", .{c});
