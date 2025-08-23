@@ -25,20 +25,18 @@ pub fn disable_raw_mode(handle: std.posix.fd_t) !void {
     try std.posix.tcsetattr(handle, .NOW, orig_term);
 }
 
-pub fn die(s: []const u8) void {
-    // Replace this by spitting out the error itself.
-    std.debug.print("{}", .{s});
-    std.os.exit(1);
+pub fn die(err: anyerror) void {
+    std.debug.print("{}", .{err});
+    std.posix.exit(1);
 }
 
 pub fn main() !void {
     const stdin = std.io.getStdIn();
     const reader = stdin.reader();
     const handle = stdin.handle;
-    try enable_raw_mode(handle);
-    defer disable_raw_mode(handle) catch |err| {
-        std.debug.print("Error: {} when setting the terminal flags back to original", .{err});
-    };
+    enable_raw_mode(handle) catch |err| die(err);
+    defer disable_raw_mode(handle) catch |err| die(err);
+
     while (true) {
         var c: u8 = 0;
         if (reader.readByte()) |b| {
@@ -47,7 +45,7 @@ pub fn main() !void {
             error.EndOfStream => {
                 c = 0;
             },
-            else => |other_err| return other_err,
+            else => |other_err| die(other_err),
         }
         if (c == 'q') {
             return;
