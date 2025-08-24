@@ -1,14 +1,17 @@
 const std = @import("std");
 
-var orig_term: std.posix.system.termios = undefined;
+const EditorState = struct {
+    orig_term: std.posix.system.termios,
+};
+var state: EditorState = undefined;
 
 inline fn ctrl_key(k: u8) u8 {
     return k & 0x1f;
 }
 
 pub fn enable_raw_mode(handle: std.posix.fd_t) !void {
-    orig_term = try std.posix.tcgetattr(handle);
-    var term = orig_term;
+    state.orig_term = try std.posix.tcgetattr(handle);
+    var term = state.orig_term;
     term.lflag.ECHO = !term.lflag.ECHO;
     term.lflag.ISIG = !term.lflag.ISIG;
     term.lflag.ICANON = !term.lflag.ICANON;
@@ -24,9 +27,8 @@ pub fn enable_raw_mode(handle: std.posix.fd_t) !void {
     term.cc[@intFromEnum(std.posix.V.TIME)] = 1;
     try std.posix.tcsetattr(handle, .NOW, term);
 }
-
 pub fn disable_raw_mode(handle: std.posix.fd_t) !void {
-    try std.posix.tcsetattr(handle, .NOW, orig_term);
+    try std.posix.tcsetattr(handle, .NOW, state.orig_term);
 }
 
 fn editor_read_key(reader: *const std.io.AnyReader) !u8 {
