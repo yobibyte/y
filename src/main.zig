@@ -33,6 +33,8 @@ const EditorState = struct {
     orig_term: posix.system.termios,
     screenrows: usize,
     screencols: usize,
+    cx: usize,
+    cy: usize,
 };
 var state: EditorState = undefined;
 
@@ -73,15 +75,10 @@ fn editor_process_keypress(reader: *const std.io.AnyReader) !bool {
     const c = try editor_read_key(reader);
     switch (c) {
         ctrl_key('q') => return false,
-        else => {
-            if (std.ascii.isControl(c)) {
-                std.debug.print("{}\r\n", .{c});
-            } else {
-                std.debug.print("{} ('{c}')\r\n", .{ c, c });
-            }
-            return true;
-        },
+        'h', 'j', 'k', 'l' => editor_move_cursor(c),
+        else => {},
     }
+    return true;
 }
 
 fn editor_refresh_screen(writer: *const std.io.AnyWriter) !void {
@@ -92,7 +89,10 @@ fn editor_refresh_screen(writer: *const std.io.AnyWriter) !void {
     try str_buf.append("\x1b[?25l");
     try str_buf.append("\x1b[H");
     try editor_draw_rows(&str_buf);
-    try str_buf.append("\x1b[H");
+    var buf: [20]u8 = undefined;
+    const escape_code = try std.fmt.bufPrint(&buf, "\x1b[{d};{d}H", .{ state.cx + 1, state.cy + 1 });
+    try str_buf.append(escape_code);
+
     try str_buf.append("\x1b[?25h");
     try writer.writeAll(str_buf.data);
 }
@@ -118,6 +118,16 @@ fn editor_draw_rows(str_buffer: *String) !void {
         if (row != state.screenrows - 1) {
             try str_buffer.append("\r\n");
         }
+    }
+}
+
+fn editor_move_cursor(key: u8) void {
+    switch (key) {
+        'h' => state.cy -= 1,
+        'j' => state.cx += 1,
+        'k' => state.cx -= 1,
+        'l' => state.cy += 1,
+        else => return,
     }
 }
 
@@ -157,6 +167,8 @@ fn init_editor(writer: *const std.io.AnyWriter, allocator: std.mem.Allocator) !v
     state.screenrows = ws[0];
     state.screencols = ws[1];
     state.allocator = allocator;
+    state.cx = 0;
+    state.cy = 0;
 }
 
 pub fn main() !void {
