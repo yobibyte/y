@@ -80,7 +80,6 @@ fn editor_refresh_screen(writer: *const std.io.AnyWriter) !void {
     defer str_buf.free();
 
     try str_buf.append("\x1b[?25l");
-    try str_buf.append("\x1b[2J");
     try str_buf.append("\x1b[H");
     try editor_draw_rows(&str_buf);
     try str_buf.append("\x1b[H");
@@ -91,6 +90,8 @@ fn editor_refresh_screen(writer: *const std.io.AnyWriter) !void {
 fn editor_draw_rows(str_buffer: *String) !void {
     for (0..state.screenrows) |row| {
         try str_buffer.append("~");
+        // Erase in line, by default, erases everything to the right of cursor.
+        try str_buffer.append("\x1b[K");
         if (row != state.screenrows - 1) {
             try str_buffer.append("\r\n");
         }
