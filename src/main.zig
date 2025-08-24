@@ -1,6 +1,16 @@
 const std = @import("std");
 const posix = std.posix;
 
+const zon: struct {
+    name: enum { y },
+    version: []const u8,
+    fingerprint: u64,
+    minimum_zig_version: []const u8,
+    paths: []const []const u8,
+} = @import("zon_mod");
+
+const welcome_msg = "yobibyte's text editor, version " ++ zon.version ++ ".";
+
 const String = struct {
     data: []const u8,
     allocator: std.mem.Allocator,
@@ -89,8 +99,21 @@ fn editor_refresh_screen(writer: *const std.io.AnyWriter) !void {
 
 fn editor_draw_rows(str_buffer: *String) !void {
     for (0..state.screenrows) |row| {
-        try str_buffer.append("~");
         // Erase in line, by default, erases everything to the right of cursor.
+        if (row == state.screenrows / 3) {
+            if (state.screencols - welcome_msg.len >= 0) {
+                const padding = (state.screencols - welcome_msg.len) / 2;
+                if (padding > 0) {
+                    try str_buffer.append("~");
+                }
+                for (0..padding - 1) |_| {
+                    try str_buffer.append(" ");
+                }
+                try str_buffer.append(welcome_msg);
+            }
+        } else {
+            try str_buffer.append("~");
+        }
         try str_buffer.append("\x1b[K");
         if (row != state.screenrows - 1) {
             try str_buffer.append("\r\n");

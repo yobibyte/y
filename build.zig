@@ -26,6 +26,11 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    const zon_module = b.createModule(.{
+        .root_source_file = b.path("build.zig.zon"),
+    });
+    exe_mod.addImport("zon_mod", zon_module);
+
     // This creates another `std.Build.Step.Compile`, but this one builds an executable
     // rather than a static library.
     const exe = b.addExecutable(.{
