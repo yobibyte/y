@@ -29,35 +29,40 @@ pub fn disable_raw_mode(handle: std.posix.fd_t) !void {
     try std.posix.tcsetattr(handle, .NOW, orig_term);
 }
 
-pub fn die(err: anyerror) void {
-    std.debug.print("{}", .{err});
-    std.posix.exit(1);
+fn editor_read_key(reader: *const std.io.AnyReader) !u8 {
+    return reader.readByte() catch |err| switch (err) {
+        error.EndOfStream => return 0,
+        else => err,
+    };
+}
+
+fn editor_process_keypress(reader: *const std.io.AnyReader) !bool {
+    const c = try editor_read_key(reader);
+    switch (c) {
+        ctrl_key('q') => return false,
+        else => {
+            if (std.ascii.isControl(c)) {
+                std.debug.print("{}\r\n", .{c});
+            } else {
+                std.debug.print("{} ('{c}')\r\n", .{ c, c });
+            }
+            return true;
+        },
+    }
 }
 
 pub fn main() !void {
     const stdin = std.io.getStdIn();
-    const reader = stdin.reader();
+    const reader = stdin.reader().any();
     const handle = stdin.handle;
-    enable_raw_mode(handle) catch |err| die(err);
-    defer disable_raw_mode(handle) catch |err| die(err);
+    try enable_raw_mode(handle);
+    defer disable_raw_mode(handle) catch |err| {
+        std.debug.print("Failed to disable raw mode: {}", .{err});
+    };
 
     while (true) {
-        var c: u8 = 0;
-        if (reader.readByte()) |b| {
-            c = b;
-        } else |err| switch (err) {
-            error.EndOfStream => {
-                c = 0;
-            },
-            else => |other_err| die(other_err),
-        }
-        if (c == ctrl_key('q')) {
+        if (!try editor_process_keypress(&reader)) {
             break;
-        }
-        if (std.ascii.isControl(c)) {
-            std.debug.print("{}\r\n", .{c});
-        } else {
-            std.debug.print("{} ('{c}')\r\n", .{ c, c });
         }
     }
 }
