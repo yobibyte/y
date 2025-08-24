@@ -79,10 +79,12 @@ fn editor_refresh_screen(writer: *const std.io.AnyWriter) !void {
     //TODO: Does this release the memory in the ArenaAllocator?
     defer str_buf.free();
 
+    try str_buf.append("\x1b[?25l");
     try str_buf.append("\x1b[2J");
     try str_buf.append("\x1b[H");
     try editor_draw_rows(&str_buf);
     try str_buf.append("\x1b[H");
+    try str_buf.append("\x1b[?25h");
     try writer.writeAll(str_buf.data);
 }
 
