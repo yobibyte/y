@@ -1,7 +1,10 @@
 const std = @import("std");
+const posix = std.posix;
 
 const EditorState = struct {
-    orig_term: std.posix.system.termios,
+    orig_term: posix.system.termios,
+    screenrows: usize,
+    screencols: usize,
 };
 var state: EditorState = undefined;
 
@@ -9,8 +12,8 @@ inline fn ctrl_key(k: u8) u8 {
     return k & 0x1f;
 }
 
-pub fn enable_raw_mode(handle: std.posix.fd_t) !void {
-    state.orig_term = try std.posix.tcgetattr(handle);
+pub fn enable_raw_mode(handle: posix.fd_t) !void {
+    state.orig_term = try posix.tcgetattr(handle);
     var term = state.orig_term;
     term.lflag.ECHO = !term.lflag.ECHO;
     term.lflag.ISIG = !term.lflag.ISIG;
@@ -22,13 +25,13 @@ pub fn enable_raw_mode(handle: std.posix.fd_t) !void {
     term.iflag.INPCK = !term.iflag.INPCK;
     term.iflag.ISTRIP = !term.iflag.ISTRIP;
     term.oflag.OPOST = !term.oflag.OPOST;
-    term.cflag.CSIZE = std.posix.CSIZE.CS8;
-    term.cc[@intFromEnum(std.posix.V.MIN)] = 0;
-    term.cc[@intFromEnum(std.posix.V.TIME)] = 1;
-    try std.posix.tcsetattr(handle, .NOW, term);
+    term.cflag.CSIZE = posix.CSIZE.CS8;
+    term.cc[@intFromEnum(posix.V.MIN)] = 0;
+    term.cc[@intFromEnum(posix.V.TIME)] = 1;
+    try posix.tcsetattr(handle, .NOW, term);
 }
-pub fn disable_raw_mode(handle: std.posix.fd_t) !void {
-    try std.posix.tcsetattr(handle, .NOW, state.orig_term);
+pub fn disable_raw_mode(handle: posix.fd_t) !void {
+    try posix.tcsetattr(handle, .NOW, state.orig_term);
 }
 
 fn editor_read_key(reader: *const std.io.AnyReader) !u8 {
@@ -61,9 +64,26 @@ fn editor_refresh_screen(writer: *const std.io.AnyWriter) !void {
 }
 
 fn editor_draw_rows(writer: *const std.io.AnyWriter) !void {
-    for (0..24) |_| {
+    for (0..state.screenrows) |_| {
         try writer.writeAll("~\r\n");
     }
+}
+
+fn get_window_size() [2]usize {
+    var ws: posix.winsize = undefined;
+    const err = std.os.linux.ioctl(posix.STDOUT_FILENO, posix.T.IOCGWINSZ, @intFromPtr(&ws));
+    if (posix.errno(err) == .SUCCESS) {
+        return .{ ws.row, ws.col };
+    } else {
+        // In the original, we quit, but I want to return some default size.
+        return .{ 25, 80 };
+    }
+}
+
+fn init_editor() void {
+    const ws = get_window_size();
+    state.screenrows = ws[0];
+    state.screencols = ws[1];
 }
 
 pub fn main() !void {
@@ -73,9 +93,11 @@ pub fn main() !void {
 
     const handle = stdin.handle;
     try enable_raw_mode(handle);
+    init_editor();
     defer disable_raw_mode(handle) catch |err| {
         std.debug.print("Failed to disable raw mode: {}", .{err});
     };
+
     // I am not sure whether this will clear the error message or not.
     errdefer editor_refresh_screen(&writer) catch |err| {
         std.debug.print("Failed to clear screen: {}", .{err});
