@@ -51,27 +51,36 @@ fn editor_process_keypress(reader: *const std.io.AnyReader) !bool {
     }
 }
 
-fn editor_refresh_screen() !void {
-    const writer = std.io.getStdOut();
+fn editor_refresh_screen(writer: *const std.io.AnyWriter) !void {
     try writer.writeAll("\x1b[2J");
     try writer.writeAll("\x1b[H");
+    try editor_draw_rows(writer);
+    try writer.writeAll("\x1b[H");
+}
+
+fn editor_draw_rows(writer: *const std.io.AnyWriter) !void {
+    for (0..24) |_| {
+        try writer.writeAll("~\r\n");
+    }
 }
 
 pub fn main() !void {
     const stdin = std.io.getStdIn();
     const reader = stdin.reader().any();
+    const writer = std.io.getStdOut().writer().any();
+
     const handle = stdin.handle;
     try enable_raw_mode(handle);
     defer disable_raw_mode(handle) catch |err| {
         std.debug.print("Failed to disable raw mode: {}", .{err});
     };
     // I am not sure whether this will clear the error message or not.
-    errdefer editor_refresh_screen() catch |err| {
+    errdefer editor_refresh_screen(&writer) catch |err| {
         std.debug.print("Failed to clear screen: {}", .{err});
     };
 
     while (true) {
-        try editor_refresh_screen();
+        try editor_refresh_screen(&writer);
         if (!try editor_process_keypress(&reader)) {
             break;
         }
