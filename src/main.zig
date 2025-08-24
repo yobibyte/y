@@ -1,7 +1,25 @@
 const std = @import("std");
 const posix = std.posix;
 
+const String = struct {
+    data: []const u8,
+    allocator: std.mem.Allocator,
+
+    fn append(self: *String, other: []const u8) !void {
+        const new_data = try self.allocator.alloc(u8, self.data.len + other.len);
+        std.mem.copyForwards(u8, new_data[0..self.data.len], self.data);
+        std.mem.copyForwards(u8, new_data[self.data.len..], other);
+        self.allocator.free(self.data);
+        self.data = new_data;
+    }
+
+    fn free(self: *String) void {
+        self.allocator.free(self.data);
+    }
+};
+
 const EditorState = struct {
+    allocator: std.mem.Allocator,
     orig_term: posix.system.termios,
     screenrows: usize,
     screencols: usize,
@@ -57,17 +75,22 @@ fn editor_process_keypress(reader: *const std.io.AnyReader) !bool {
 }
 
 fn editor_refresh_screen(writer: *const std.io.AnyWriter) !void {
-    try writer.writeAll("\x1b[2J");
-    try writer.writeAll("\x1b[H");
-    try editor_draw_rows(writer);
-    try writer.writeAll("\x1b[H");
+    var str_buf = String{ .data = "", .allocator = state.allocator };
+    //TODO: Does this release the memory in the ArenaAllocator?
+    defer str_buf.free();
+
+    try str_buf.append("\x1b[2J");
+    try str_buf.append("\x1b[H");
+    try editor_draw_rows(&str_buf);
+    try str_buf.append("\x1b[H");
+    try writer.writeAll(str_buf.data);
 }
 
-fn editor_draw_rows(writer: *const std.io.AnyWriter) !void {
+fn editor_draw_rows(str_buffer: *String) !void {
     for (0..state.screenrows) |row| {
-        try writer.writeAll("~");
+        try str_buffer.append("~");
         if (row != state.screenrows - 1) {
-            try writer.writeAll("\r\n");
+            try str_buffer.append("\r\n");
         }
     }
 }
@@ -103,10 +126,11 @@ fn get_window_size(writer: *const std.io.AnyWriter) ![2]usize {
     }
 }
 
-fn init_editor(writer: *const std.io.AnyWriter) !void {
+fn init_editor(writer: *const std.io.AnyWriter, allocator: std.mem.Allocator) !void {
     const ws = try get_window_size(writer);
     state.screenrows = ws[0];
     state.screencols = ws[1];
+    state.allocator = allocator;
 }
 
 pub fn main() !void {
@@ -114,9 +138,12 @@ pub fn main() !void {
     const reader = stdin.reader().any();
     const writer = std.io.getStdOut().writer().any();
 
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+
     const handle = stdin.handle;
     try enable_raw_mode(handle);
-    try init_editor(&writer);
+    try init_editor(&writer, arena.allocator());
     defer disable_raw_mode(handle) catch |err| {
         std.debug.print("Failed to disable raw mode: {}", .{err});
     };
