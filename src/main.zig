@@ -72,21 +72,39 @@ fn editor_draw_rows(writer: *const std.io.AnyWriter) !void {
     }
 }
 
-// Next step:
-// https://viewsourcecode.org/snaptoken/kilo/03.rawInputAndOutput.html#window-size-the-hard-way
-fn get_window_size() [2]usize {
+fn get_cursor_position(writer: *const std.io.AnyWriter) ![2]usize {
+    try writer.writeAll("\x1b[6n");
+    const stdin = std.io.getStdIn();
+    const reader = stdin.reader().any();
+
+    //[2..] because we get an escape sequence coming back.
+    // It looks like 27[rows;colsR, we need to parse it.
+    var buf: [32]u8 = undefined;
+    const line = try reader.readUntilDelimiterOrEof(&buf, 'R') orelse "";
+    var tokenizer = std.mem.splitScalar(u8, line[2..], ';');
+
+    // Have some default values in case this thing fails.
+    const rows = try std.fmt.parseInt(usize, tokenizer.next() orelse "25", 10);
+    const cols = try std.fmt.parseInt(usize, tokenizer.next() orelse "80", 10);
+
+    return .{ rows, cols };
+}
+
+fn get_window_size(writer: *const std.io.AnyWriter) ![2]usize {
     var ws: posix.winsize = undefined;
     const err = std.os.linux.ioctl(posix.STDOUT_FILENO, posix.T.IOCGWINSZ, @intFromPtr(&ws));
+
     if (posix.errno(err) == .SUCCESS) {
         return .{ ws.row, ws.col };
     } else {
-        // In the original, we quit, but I want to return some default size.
-        return .{ 25, 80 };
+        // If ioctl failed, we will move cursor to the bottom right position and get its coordinates.
+        try writer.writeAll("\x1b[999C\x1b[999B");
+        return get_cursor_position(writer);
     }
 }
 
-fn init_editor() void {
-    const ws = get_window_size();
+fn init_editor(writer: *const std.io.AnyWriter) !void {
+    const ws = try get_window_size(writer);
     state.screenrows = ws[0];
     state.screencols = ws[1];
 }
@@ -98,7 +116,7 @@ pub fn main() !void {
 
     const handle = stdin.handle;
     try enable_raw_mode(handle);
-    init_editor();
+    try init_editor(&writer);
     defer disable_raw_mode(handle) catch |err| {
         std.debug.print("Failed to disable raw mode: {}", .{err});
     };
