@@ -64,11 +64,16 @@ fn editor_refresh_screen(writer: *const std.io.AnyWriter) !void {
 }
 
 fn editor_draw_rows(writer: *const std.io.AnyWriter) !void {
-    for (0..state.screenrows) |_| {
-        try writer.writeAll("~\r\n");
+    for (0..state.screenrows) |row| {
+        try writer.writeAll("~");
+        if (row != state.screenrows - 1) {
+            try writer.writeAll("\r\n");
+        }
     }
 }
 
+// Next step:
+// https://viewsourcecode.org/snaptoken/kilo/03.rawInputAndOutput.html#window-size-the-hard-way
 fn get_window_size() [2]usize {
     var ws: posix.winsize = undefined;
     const err = std.os.linux.ioctl(posix.STDOUT_FILENO, posix.T.IOCGWINSZ, @intFromPtr(&ws));
