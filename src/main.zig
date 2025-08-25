@@ -13,6 +13,7 @@ const KEY_PGUP = 1004;
 const KEY_PGDOWN = 1005;
 const KEY_HOME = 1006;
 const KEY_END = 1007;
+const KEY_DEL= 1008;
 
 const zon: struct {
     name: enum { y },
@@ -93,6 +94,7 @@ fn editor_read_key(reader: *const std.io.AnyReader) !u16 {
                     if (c3 == '~') {
                         switch (c2) {
                             '1' => return KEY_HOME,
+                            '3' => return KEY_DEL,
                             '4' => return KEY_END,
                             '5' => return KEY_PGUP,
                             '6' => return KEY_PGDOWN,
