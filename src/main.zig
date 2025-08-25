@@ -9,6 +9,8 @@ const KEY_UP = 1000;
 const KEY_DOWN = 1001;
 const KEY_LEFT = 1002;
 const KEY_RIGHT = 1003;
+const KEY_PGUP = 1004;
+const KEY_PGDOWN = 1005;
 
 const zon: struct {
     name: enum { y },
@@ -84,6 +86,18 @@ fn editor_read_key(reader: *const std.io.AnyReader) !u16 {
         if (c1 == '[') {
             const c2 = reader.readByte() catch return '\x1b';
             switch (c2) {
+                '1'...'9' => {
+                    const c3 = reader.readByte() catch return '\x1b';
+                    if (c3 == '~') {
+                        switch (c2) {
+                            '5' => return KEY_PGUP,
+                            '6' => return KEY_PGDOWN,
+                            else => {
+                                std.debug.print("Only 5 or 6 are possible.", .{});
+                            },
+                        }
+                    }
+                },
                 'A' => return KEY_UP,
                 'B' => return KEY_DOWN,
                 'C' => return KEY_RIGHT,
@@ -102,6 +116,11 @@ fn editor_process_keypress(reader: *const std.io.AnyReader) !bool {
     switch (c) {
         ctrl_key('q') => return false,
         KEY_UP, KEY_DOWN, KEY_RIGHT, KEY_LEFT => editor_move_cursor(c),
+        KEY_PGUP, KEY_PGDOWN => {
+            for (0..state.screenrows) |_| {
+                editor_move_cursor(if (c == KEY_PGUP) KEY_UP else KEY_DOWN);
+            }
+        },
         else => {},
     }
     return true;
