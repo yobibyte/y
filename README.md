@@ -18,3 +18,4 @@ This is still too early, but this is the subset of vim I care about. I wonder ho
 - quickfix list
 - undo file
 - using system's clipboard (vim.o.clipboard = "unnamedplus")
+- utf8 support
