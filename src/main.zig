@@ -1,6 +1,15 @@
 const std = @import("std");
 const posix = std.posix;
 
+// In the original tutorial, this is a enum.
+// But I do not want to create an element for every char.
+// Maybe there is a better way, but for now I'll keep it as is.
+// Give the keys values above char levels to use actual chars to edit text.
+const KEY_UP = 1000;
+const KEY_DOWN = 1001;
+const KEY_LEFT = 1002;
+const KEY_RIGHT = 1003;
+
 const zon: struct {
     name: enum { y },
     version: []const u8,
@@ -64,18 +73,35 @@ pub fn disable_raw_mode(handle: posix.fd_t) !void {
     try posix.tcsetattr(handle, .NOW, state.orig_term);
 }
 
-fn editor_read_key(reader: *const std.io.AnyReader) !u8 {
-    return reader.readByte() catch |err| switch (err) {
+fn editor_read_key(reader: *const std.io.AnyReader) !u16 {
+    const c = reader.readByte() catch |err| switch (err) {
         error.EndOfStream => return 0,
-        else => err,
+        else => return err,
     };
+
+    if (c == '\x1b') {
+        const c1 = reader.readByte() catch return '\x1b';
+        if (c1 == '[') {
+            const c2 = reader.readByte() catch return '\x1b';
+            switch (c2) {
+                'A' => return KEY_UP,
+                'B' => return KEY_DOWN,
+                'C' => return KEY_RIGHT,
+                'D' => return KEY_LEFT,
+                else => {},
+            }
+        }
+        return '\x1b';
+    } else {
+        return c;
+    }
 }
 
 fn editor_process_keypress(reader: *const std.io.AnyReader) !bool {
     const c = try editor_read_key(reader);
     switch (c) {
         ctrl_key('q') => return false,
-        'h', 'j', 'k', 'l' => editor_move_cursor(c),
+        KEY_UP, KEY_DOWN, KEY_RIGHT, KEY_LEFT => editor_move_cursor(c),
         else => {},
     }
     return true;
@@ -121,12 +147,28 @@ fn editor_draw_rows(str_buffer: *String) !void {
     }
 }
 
-fn editor_move_cursor(key: u8) void {
+fn editor_move_cursor(key: u16) void {
     switch (key) {
-        'h' => state.cy -= 1,
-        'j' => state.cx += 1,
-        'k' => state.cx -= 1,
-        'l' => state.cy += 1,
+        KEY_LEFT => {
+            if (state.cy > 0) {
+                state.cy -= 1;
+            }
+        },
+        KEY_DOWN => {
+            if (state.cx < state.screenrows - 1) {
+                state.cx += 1;
+            }
+        },
+        KEY_UP => {
+            if (state.cx > 0) {
+                state.cx -= 1;
+            }
+        },
+        KEY_RIGHT => {
+            if (state.cy < state.screencols - 1) {
+                state.cy += 1;
+            }
+        },
         else => return,
     }
 }
