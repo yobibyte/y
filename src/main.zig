@@ -13,7 +13,7 @@ const KEY_PGUP = 1004;
 const KEY_PGDOWN = 1005;
 const KEY_HOME = 1006;
 const KEY_END = 1007;
-const KEY_DEL= 1008;
+const KEY_DEL = 1008;
 
 const zon: struct {
     name: enum { y },
@@ -48,7 +48,9 @@ const EditorState = struct {
     screenrows: usize,
     screencols: usize,
     cx: usize,
-    cy: usize,
+    cy: usize, // y coordinate in the file frame of reference.
+    rows: std.ArrayList([]u8),
+    rowoffset: usize,
 };
 var state: EditorState = undefined;
 
@@ -138,17 +140,26 @@ fn editor_process_keypress(reader: *const std.io.AnyReader) !bool {
             }
         },
         KEY_HOME => {
-            state.cy = 0;
+            state.cx = 0;
         },
         KEY_END => {
-            state.cy = state.screencols - 1;
+            state.cx = state.screencols - 1;
         },
         else => {},
     }
     return true;
 }
 
+fn editor_scroll() void {
+    if (state.cy < state.rowoffset) {
+        state.rowoffset = state.cy;
+    }
+    if (state.cy >= state.rowoffset + state.screenrows) {
+        state.rowoffset = state.cy - state.screenrows + 1;
+    }
+}
 fn editor_refresh_screen(writer: *const std.io.AnyWriter) !void {
+    editor_scroll();
     var str_buf = String{ .data = "", .allocator = state.allocator };
     //TODO: Does this release the memory in the ArenaAllocator?
     defer str_buf.free();
@@ -157,7 +168,7 @@ fn editor_refresh_screen(writer: *const std.io.AnyWriter) !void {
     try str_buf.append("\x1b[H");
     try editor_draw_rows(&str_buf);
     var buf: [20]u8 = undefined;
-    const escape_code = try std.fmt.bufPrint(&buf, "\x1b[{d};{d}H", .{ state.cx + 1, state.cy + 1 });
+    const escape_code = try std.fmt.bufPrint(&buf, "\x1b[{d};{d}H", .{ state.cy - state.rowoffset + 1, state.cx + 1 });
     try str_buf.append(escape_code);
 
     try str_buf.append("\x1b[?25h");
@@ -165,21 +176,26 @@ fn editor_refresh_screen(writer: *const std.io.AnyWriter) !void {
 }
 
 fn editor_draw_rows(str_buffer: *String) !void {
-    for (0..state.screenrows) |row| {
+    for (state.rowoffset..state.screenrows + state.rowoffset) |row| {
         // Erase in line, by default, erases everything to the right of cursor.
-        if (row == state.screenrows / 3) {
-            if (state.screencols - welcome_msg.len >= 0) {
-                const padding = (state.screencols - welcome_msg.len) / 2;
-                if (padding > 0) {
-                    try str_buffer.append("~");
+        if (row >= state.rows.items.len) {
+            if (state.rows.items.len == 0 and row == state.screenrows / 3) {
+                if (state.screencols - welcome_msg.len >= 0) {
+                    const padding = (state.screencols - welcome_msg.len) / 2;
+                    if (padding > 0) {
+                        try str_buffer.append("~");
+                    }
+                    for (0..padding - 1) |_| {
+                        try str_buffer.append(" ");
+                    }
+                    try str_buffer.append(welcome_msg);
                 }
-                for (0..padding - 1) |_| {
-                    try str_buffer.append(" ");
-                }
-                try str_buffer.append(welcome_msg);
+            } else {
+                try str_buffer.append("~");
             }
         } else {
-            try str_buffer.append("~");
+            const crow = state.rows.items[row];
+            try str_buffer.append(crow[0..@min(crow.len, state.screencols)]);
         }
         try str_buffer.append("\x1b[K");
         if (row != state.screenrows - 1) {
@@ -191,23 +207,23 @@ fn editor_draw_rows(str_buffer: *String) !void {
 fn editor_move_cursor(key: u16) void {
     switch (key) {
         KEY_LEFT => {
-            if (state.cy > 0) {
-                state.cy -= 1;
-            }
-        },
-        KEY_DOWN => {
-            if (state.cx < state.screenrows - 1) {
-                state.cx += 1;
-            }
-        },
-        KEY_UP => {
             if (state.cx > 0) {
                 state.cx -= 1;
             }
         },
-        KEY_RIGHT => {
-            if (state.cy < state.screencols - 1) {
+        KEY_DOWN => {
+            if (state.cy < state.rows.items.len - 1) {
                 state.cy += 1;
+            }
+        },
+        KEY_UP => {
+            if (state.cy > 0) {
+                state.cy -= 1;
+            }
+        },
+        KEY_RIGHT => {
+            if (state.cx < state.screencols - 1) {
+                state.cx += 1;
             }
         },
         else => return,
@@ -252,6 +268,16 @@ fn init_editor(writer: *const std.io.AnyWriter, allocator: std.mem.Allocator) !v
     state.allocator = allocator;
     state.cx = 0;
     state.cy = 0;
+    state.rows = std.ArrayList([]u8).init(allocator);
+    state.rowoffset = 0;
+}
+
+fn editor_open(fname: []const u8) !void {
+    var file = try std.fs.cwd().openFile(fname, .{});
+    var reader = file.reader();
+    while (try reader.readUntilDelimiterOrEofAlloc(state.allocator, '\n', 1024)) |line| {
+        try state.rows.append(line);
+    }
 }
 
 pub fn main() !void {
@@ -265,6 +291,9 @@ pub fn main() !void {
     const handle = stdin.handle;
     try enable_raw_mode(handle);
     try init_editor(&writer, arena.allocator());
+    if (std.os.argv.len > 1) {
+        try editor_open(std.mem.span(std.os.argv[1]));
+    }
     defer disable_raw_mode(handle) catch |err| {
         std.debug.print("Failed to disable raw mode: {}", .{err});
     };
