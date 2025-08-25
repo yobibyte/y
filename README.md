@@ -6,6 +6,7 @@ The goal is to get to something simple first, and then add modalities/vim keybin
 This is still too early, but this is the subset of vim I care about. I wonder how far can I push this.
 - normal/visual/replace mode
 - vim motions
+- line wrapping
 - go to a line number with :<line number>
 - search and replace
 - tab expansion, controlling tabwidth
