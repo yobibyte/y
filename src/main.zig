@@ -51,14 +51,15 @@ const EditorState = struct {
     cy: usize, // y coordinate in the file frame of reference.
     rows: std.ArrayList([]u8),
     rowoffset: usize,
+    coloffset: usize,
 };
 var state: EditorState = undefined;
 
-inline fn ctrl_key(k: u8) u8 {
+inline fn ctrlKey(k: u8) u8 {
     return k & 0x1f;
 }
 
-pub fn enable_raw_mode(handle: posix.fd_t) !void {
+pub fn enableRawMode(handle: posix.fd_t) !void {
     state.orig_term = try posix.tcgetattr(handle);
     var term = state.orig_term;
     term.lflag.ECHO = !term.lflag.ECHO;
@@ -76,11 +77,11 @@ pub fn enable_raw_mode(handle: posix.fd_t) !void {
     term.cc[@intFromEnum(posix.V.TIME)] = 1;
     try posix.tcsetattr(handle, .NOW, term);
 }
-pub fn disable_raw_mode(handle: posix.fd_t) !void {
+pub fn disableRawMode(handle: posix.fd_t) !void {
     try posix.tcsetattr(handle, .NOW, state.orig_term);
 }
 
-fn editor_read_key(reader: *const std.io.AnyReader) !u16 {
+fn editorReadKey(reader: *const std.io.AnyReader) !u16 {
     const c = reader.readByte() catch |err| switch (err) {
         error.EndOfStream => return 0,
         else => return err,
@@ -129,56 +130,65 @@ fn editor_read_key(reader: *const std.io.AnyReader) !u16 {
     }
 }
 
-fn editor_process_keypress(reader: *const std.io.AnyReader) !bool {
-    const c = try editor_read_key(reader);
+fn editorProcessKeypress(reader: *const std.io.AnyReader) !bool {
+    const c = try editorReadKey(reader);
     switch (c) {
-        ctrl_key('q') => return false,
-        KEY_UP, KEY_DOWN, KEY_RIGHT, KEY_LEFT => editor_move_cursor(c),
+        ctrlKey('q') => return false,
+        KEY_UP, KEY_DOWN, KEY_RIGHT, KEY_LEFT => editorMoveCursor(c),
         KEY_PGUP, KEY_PGDOWN => {
             for (0..state.screenrows) |_| {
-                editor_move_cursor(if (c == KEY_PGUP) KEY_UP else KEY_DOWN);
+                editorMoveCursor(if (c == KEY_PGUP) KEY_UP else KEY_DOWN);
             }
         },
         KEY_HOME => {
             state.cx = 0;
         },
         KEY_END => {
-            state.cx = state.screencols - 1;
+            if (state.cy < state.rows.items.len) {
+                state.cx = state.rows.items[state.cy].len;
+            }
         },
         else => {},
     }
     return true;
 }
 
-fn editor_scroll() void {
+fn editorScroll() void {
     if (state.cy < state.rowoffset) {
         state.rowoffset = state.cy;
     }
     if (state.cy >= state.rowoffset + state.screenrows) {
         state.rowoffset = state.cy - state.screenrows + 1;
     }
+    if (state.cx < state.coloffset) {
+        state.coloffset = state.cx;
+    }
+    if (state.cx >= state.coloffset + state.screencols) {
+        state.coloffset = state.cx - state.screencols + 1;
+    }
 }
-fn editor_refresh_screen(writer: *const std.io.AnyWriter) !void {
-    editor_scroll();
+fn editorRefreshScreen(writer: *const std.io.AnyWriter) !void {
+    editorScroll();
     var str_buf = String{ .data = "", .allocator = state.allocator };
     //TODO: Does this release the memory in the ArenaAllocator?
     defer str_buf.free();
 
     try str_buf.append("\x1b[?25l");
     try str_buf.append("\x1b[H");
-    try editor_draw_rows(&str_buf);
+    try editorDrawRows(&str_buf);
     var buf: [20]u8 = undefined;
-    const escape_code = try std.fmt.bufPrint(&buf, "\x1b[{d};{d}H", .{ state.cy - state.rowoffset + 1, state.cx + 1 });
+    const escape_code = try std.fmt.bufPrint(&buf, "\x1b[{d};{d}H", .{ state.cy - state.rowoffset + 1, state.cx - state.coloffset + 1 });
     try str_buf.append(escape_code);
 
     try str_buf.append("\x1b[?25h");
     try writer.writeAll(str_buf.data);
 }
 
-fn editor_draw_rows(str_buffer: *String) !void {
+fn editorDrawRows(str_buffer: *String) !void {
     for (0..state.screenrows) |row| {
         const filerow = state.rowoffset + row;
         // Erase in line, by default, erases everything to the right of cursor.
+        // TODO: I wonder how these .len calls would behave with utf-8 chars.
         if (filerow >= state.rows.items.len) {
             if (state.rows.items.len == 0 and row == state.screenrows / 3) {
                 if (state.screencols - welcome_msg.len >= 0) {
@@ -196,7 +206,13 @@ fn editor_draw_rows(str_buffer: *String) !void {
             }
         } else {
             const crow = state.rows.items[filerow];
-            try str_buffer.append(crow[0..@min(crow.len, state.screencols)]);
+            if (crow.len >= state.coloffset) {
+                var maxlen = crow.len - state.coloffset;
+                if (maxlen > state.screencols) {
+                    maxlen = state.screencols;
+                }
+                try str_buffer.append(crow[state.coloffset .. state.coloffset + maxlen]);
+            }
         }
         try str_buffer.append("\x1b[K");
         if (row != state.screenrows - 1) {
@@ -205,7 +221,7 @@ fn editor_draw_rows(str_buffer: *String) !void {
     }
 }
 
-fn editor_move_cursor(key: u16) void {
+fn editorMoveCursor(key: u16) void {
     switch (key) {
         KEY_LEFT => {
             if (state.cx > 0) {
@@ -213,7 +229,7 @@ fn editor_move_cursor(key: u16) void {
             }
         },
         KEY_DOWN => {
-            if (state.cy < state.rows.items.len - 1) {
+            if (state.cy < state.rows.items.len) {
                 state.cy += 1;
             }
         },
@@ -223,15 +239,21 @@ fn editor_move_cursor(key: u16) void {
             }
         },
         KEY_RIGHT => {
-            if (state.cx < state.screencols - 1) {
-                state.cx += 1;
+            if (state.cy < state.rows.items.len) {
+                if (state.cx < state.rows.items[state.cy].len) {
+                    state.cx += 1;
+                }
             }
         },
         else => return,
     }
+    const rowlen = if (state.cy < state.rows.items.len) state.rows.items[state.cy].len else 0;
+    if (state.cx > rowlen) {
+        state.cx = rowlen;
+    }
 }
 
-fn get_cursor_position(writer: *const std.io.AnyWriter) ![2]usize {
+fn getCursorPosition(writer: *const std.io.AnyWriter) ![2]usize {
     try writer.writeAll("\x1b[6n");
     const stdin = std.io.getStdIn();
     const reader = stdin.reader().any();
@@ -249,7 +271,7 @@ fn get_cursor_position(writer: *const std.io.AnyWriter) ![2]usize {
     return .{ rows, cols };
 }
 
-fn get_window_size(writer: *const std.io.AnyWriter) ![2]usize {
+fn getWindowSize(writer: *const std.io.AnyWriter) ![2]usize {
     var ws: posix.winsize = undefined;
     const err = std.os.linux.ioctl(posix.STDOUT_FILENO, posix.T.IOCGWINSZ, @intFromPtr(&ws));
 
@@ -258,12 +280,12 @@ fn get_window_size(writer: *const std.io.AnyWriter) ![2]usize {
     } else {
         // If ioctl failed, we will move cursor to the bottom right position and get its coordinates.
         try writer.writeAll("\x1b[999C\x1b[999B");
-        return get_cursor_position(writer);
+        return getCursorPosition(writer);
     }
 }
 
-fn init_editor(writer: *const std.io.AnyWriter, allocator: std.mem.Allocator) !void {
-    const ws = try get_window_size(writer);
+fn initEditor(writer: *const std.io.AnyWriter, allocator: std.mem.Allocator) !void {
+    const ws = try getWindowSize(writer);
     state.screenrows = ws[0];
     state.screencols = ws[1];
     state.allocator = allocator;
@@ -271,9 +293,10 @@ fn init_editor(writer: *const std.io.AnyWriter, allocator: std.mem.Allocator) !v
     state.cy = 0;
     state.rows = std.ArrayList([]u8).init(allocator);
     state.rowoffset = 0;
+    state.coloffset = 0;
 }
 
-fn editor_open(fname: []const u8) !void {
+fn editorOpen(fname: []const u8) !void {
     var file = try std.fs.cwd().openFile(fname, .{});
     var reader = file.reader();
     while (try reader.readUntilDelimiterOrEofAlloc(state.allocator, '\n', 1024)) |line| {
@@ -290,23 +313,23 @@ pub fn main() !void {
     defer arena.deinit();
 
     const handle = stdin.handle;
-    try enable_raw_mode(handle);
-    try init_editor(&writer, arena.allocator());
+    try enableRawMode(handle);
+    try initEditor(&writer, arena.allocator());
     if (std.os.argv.len > 1) {
-        try editor_open(std.mem.span(std.os.argv[1]));
+        try editorOpen(std.mem.span(std.os.argv[1]));
     }
-    defer disable_raw_mode(handle) catch |err| {
+    defer disableRawMode(handle) catch |err| {
         std.debug.print("Failed to disable raw mode: {}", .{err});
     };
 
     // I am not sure whether this will clear the error message or not.
-    errdefer editor_refresh_screen(&writer) catch |err| {
+    errdefer editorRefreshScreen(&writer) catch |err| {
         std.debug.print("Failed to clear screen: {}", .{err});
     };
 
     while (true) {
-        try editor_refresh_screen(&writer);
-        if (!try editor_process_keypress(&reader)) {
+        try editorRefreshScreen(&writer);
+        if (!try editorProcessKeypress(&reader)) {
             break;
         }
     }
