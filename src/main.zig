@@ -11,6 +11,8 @@ const KEY_LEFT = 1002;
 const KEY_RIGHT = 1003;
 const KEY_PGUP = 1004;
 const KEY_PGDOWN = 1005;
+const KEY_HOME = 1006;
+const KEY_END = 1007;
 
 const zon: struct {
     name: enum { y },
@@ -90,8 +92,12 @@ fn editor_read_key(reader: *const std.io.AnyReader) !u16 {
                     const c3 = reader.readByte() catch return '\x1b';
                     if (c3 == '~') {
                         switch (c2) {
+                            '1' => return KEY_HOME,
+                            '4' => return KEY_END,
                             '5' => return KEY_PGUP,
                             '6' => return KEY_PGDOWN,
+                            '7' => return KEY_HOME,
+                            '8' => return KEY_END,
                             else => {
                                 std.debug.print("Only 5 or 6 are possible.", .{});
                             },
@@ -102,6 +108,14 @@ fn editor_read_key(reader: *const std.io.AnyReader) !u16 {
                 'B' => return KEY_DOWN,
                 'C' => return KEY_RIGHT,
                 'D' => return KEY_LEFT,
+                'H' => return KEY_HOME,
+                'F' => return KEY_END,
+                else => {},
+            }
+        } else if (c1 == 'O') {
+            switch (c1) {
+                'H' => return KEY_HOME,
+                'F' => return KEY_END,
                 else => {},
             }
         }
@@ -120,6 +134,12 @@ fn editor_process_keypress(reader: *const std.io.AnyReader) !bool {
             for (0..state.screenrows) |_| {
                 editor_move_cursor(if (c == KEY_PGUP) KEY_UP else KEY_DOWN);
             }
+        },
+        KEY_HOME => {
+            state.cy = 0;
+        },
+        KEY_END => {
+            state.cy = state.screencols - 1;
         },
         else => {},
     }
