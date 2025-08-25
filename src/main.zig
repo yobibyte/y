@@ -176,9 +176,10 @@ fn editor_refresh_screen(writer: *const std.io.AnyWriter) !void {
 }
 
 fn editor_draw_rows(str_buffer: *String) !void {
-    for (state.rowoffset..state.screenrows + state.rowoffset) |row| {
+    for (0..state.screenrows) |row| {
+        const filerow = state.rowoffset + row;
         // Erase in line, by default, erases everything to the right of cursor.
-        if (row >= state.rows.items.len) {
+        if (filerow >= state.rows.items.len) {
             if (state.rows.items.len == 0 and row == state.screenrows / 3) {
                 if (state.screencols - welcome_msg.len >= 0) {
                     const padding = (state.screencols - welcome_msg.len) / 2;
@@ -194,7 +195,7 @@ fn editor_draw_rows(str_buffer: *String) !void {
                 try str_buffer.append("~");
             }
         } else {
-            const crow = state.rows.items[row];
+            const crow = state.rows.items[filerow];
             try str_buffer.append(crow[0..@min(crow.len, state.screencols)]);
         }
         try str_buffer.append("\x1b[K");
