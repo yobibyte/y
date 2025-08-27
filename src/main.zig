@@ -317,21 +317,16 @@ fn editorOpen(fname: []const u8) !void {
     var reader = file.reader(&stdin_buffer);
 
     while (true) {
-        const line = try reader.interface.takeDelimiterExclusive('\n');
-        std.debug.print("{s}", .{line});
-
-        if (line.len == 0) break; // EOF
+        const line = reader.interface.takeDelimiterExclusive('\n') catch |err| {
+            switch (err) {
+                error.EndOfStream => break,
+                else => return err,
+            }
+        };
         const line_copy = try state.allocator.alloc(u8, line.len);
         std.mem.copyForwards(u8, line_copy, line);
         try state.rows.append(Row{ .content = line, .render = line_copy });
     }
-
-    // var reader = std.fs.File.reader(file);
-    // while (try reader.readUntilDelimiterOrEofAlloc(state.allocator, '\n', 1024)) |line| {
-    //     const line_copy = try state.allocator.alloc(u8, line.len);
-    //     std.mem.copyForwards(u8, line_copy, line);
-    //     try state.rows.append(Row{ .content = line, .render = line_copy });
-    // }
 }
 
 pub fn main() !void {
