@@ -42,6 +42,15 @@ const String = struct {
     }
 };
 
+const Row = struct {
+    content: []u8,
+    render: []u8,
+
+    fn len(self: *Row) usize {
+        return self.content.len;
+    }
+};
+
 const EditorState = struct {
     allocator: std.mem.Allocator,
     orig_term: posix.system.termios,
@@ -49,7 +58,7 @@ const EditorState = struct {
     screencols: usize,
     cx: usize,
     cy: usize, // y coordinate in the file frame of reference.
-    rows: std.ArrayList([]u8),
+    rows: std.array_list.Managed(Row),
     rowoffset: usize,
     coloffset: usize,
 };
@@ -81,19 +90,20 @@ pub fn disableRawMode(handle: posix.fd_t) !void {
     try posix.tcsetattr(handle, .NOW, state.orig_term);
 }
 
-fn editorReadKey(reader: *const std.io.AnyReader) !u16 {
-    const c = reader.readByte() catch |err| switch (err) {
+fn editorReadKey(reader: *std.fs.File.Reader) !u16 {
+    var oldreader = reader.interface.adaptToOldInterface();
+    const c = oldreader.readByte() catch |err| switch (err) {
         error.EndOfStream => return 0,
         else => return err,
     };
 
     if (c == '\x1b') {
-        const c1 = reader.readByte() catch return '\x1b';
+        const c1 = oldreader.readByte() catch return '\x1b';
         if (c1 == '[') {
-            const c2 = reader.readByte() catch return '\x1b';
+            const c2 = oldreader.readByte() catch return '\x1b';
             switch (c2) {
                 '1'...'9' => {
-                    const c3 = reader.readByte() catch return '\x1b';
+                    const c3 = oldreader.readByte() catch return '\x1b';
                     if (c3 == '~') {
                         switch (c2) {
                             '1' => return KEY_HOME,
@@ -130,7 +140,7 @@ fn editorReadKey(reader: *const std.io.AnyReader) !u16 {
     }
 }
 
-fn editorProcessKeypress(reader: *const std.io.AnyReader) !bool {
+fn editorProcessKeypress(reader: *std.fs.File.Reader) !bool {
     const c = try editorReadKey(reader);
     switch (c) {
         ctrlKey('q') => return false,
@@ -145,7 +155,7 @@ fn editorProcessKeypress(reader: *const std.io.AnyReader) !bool {
         },
         KEY_END => {
             if (state.cy < state.rows.items.len) {
-                state.cx = state.rows.items[state.cy].len;
+                state.cx = state.rows.items[state.cy].len();
             }
         },
         else => {},
@@ -167,7 +177,7 @@ fn editorScroll() void {
         state.coloffset = state.cx - state.screencols + 1;
     }
 }
-fn editorRefreshScreen(writer: *const std.io.AnyWriter) !void {
+fn editorRefreshScreen(writer: *const std.fs.File) !void {
     editorScroll();
     var str_buf = String{ .data = "", .allocator = state.allocator };
     //TODO: Does this release the memory in the ArenaAllocator?
@@ -205,7 +215,7 @@ fn editorDrawRows(str_buffer: *String) !void {
                 try str_buffer.append("~");
             }
         } else {
-            const crow = state.rows.items[filerow];
+            const crow = state.rows.items[filerow].render;
             if (crow.len >= state.coloffset) {
                 var maxlen = crow.len - state.coloffset;
                 if (maxlen > state.screencols) {
@@ -240,28 +250,29 @@ fn editorMoveCursor(key: u16) void {
         },
         KEY_RIGHT => {
             if (state.cy < state.rows.items.len) {
-                if (state.cx < state.rows.items[state.cy].len) {
+                if (state.cx < state.rows.items[state.cy].len()) {
                     state.cx += 1;
                 }
             }
         },
         else => return,
     }
-    const rowlen = if (state.cy < state.rows.items.len) state.rows.items[state.cy].len else 0;
+    const rowlen = if (state.cy < state.rows.items.len) state.rows.items[state.cy].len() else 0;
     if (state.cx > rowlen) {
         state.cx = rowlen;
     }
 }
 
-fn getCursorPosition(writer: *const std.io.AnyWriter) ![2]usize {
+fn getCursorPosition(writer: *const std.fs.File) ![2]usize {
     try writer.writeAll("\x1b[6n");
-    const stdin = std.io.getStdIn();
-    const reader = stdin.reader().any();
+    const stdin = std.fs.File.stdin();
+    var stdin_buffer: [1024]u8 = undefined;
+    var reader = stdin.reader(&stdin_buffer);
 
     //[2..] because we get an escape sequence coming back.
     // It looks like 27[rows;colsR, we need to parse it.
-    var buf: [32]u8 = undefined;
-    const line = try reader.readUntilDelimiterOrEof(&buf, 'R') orelse "";
+    // var buf: [32]u8 = undefined;
+    const line = try reader.interface.takeDelimiterExclusive('R');
     var tokenizer = std.mem.splitScalar(u8, line[2..], ';');
 
     // Have some default values in case this thing fails.
@@ -271,7 +282,7 @@ fn getCursorPosition(writer: *const std.io.AnyWriter) ![2]usize {
     return .{ rows, cols };
 }
 
-fn getWindowSize(writer: *const std.io.AnyWriter) ![2]usize {
+fn getWindowSize(writer: *const std.fs.File) ![2]usize {
     var ws: posix.winsize = undefined;
     const err = std.os.linux.ioctl(posix.STDOUT_FILENO, posix.T.IOCGWINSZ, @intFromPtr(&ws));
 
@@ -284,37 +295,62 @@ fn getWindowSize(writer: *const std.io.AnyWriter) ![2]usize {
     }
 }
 
-fn initEditor(writer: *const std.io.AnyWriter, allocator: std.mem.Allocator) !void {
+fn initEditor(writer: *const std.fs.File, allocator: std.mem.Allocator) !void {
     const ws = try getWindowSize(writer);
     state.screenrows = ws[0];
     state.screencols = ws[1];
     state.allocator = allocator;
     state.cx = 0;
     state.cy = 0;
-    state.rows = std.ArrayList([]u8).init(allocator);
+    state.rows = std.array_list.Managed(Row).init(allocator);
     state.rowoffset = 0;
     state.coloffset = 0;
 }
 
 fn editorOpen(fname: []const u8) !void {
-    var file = try std.fs.cwd().openFile(fname, .{});
-    var reader = file.reader();
-    while (try reader.readUntilDelimiterOrEofAlloc(state.allocator, '\n', 1024)) |line| {
-        try state.rows.append(line);
+    std.debug.print("{s}", .{fname});
+    const file = try std.fs.cwd().openFile(fname, .{ .mode = .read_only });
+    defer file.close();
+
+    // Wrap the file in a buffered reader
+    var stdin_buffer: [1024]u8 = undefined;
+    var reader = file.reader(&stdin_buffer);
+
+    while (true) {
+        const line = try reader.interface.takeDelimiterExclusive('\n');
+        std.debug.print("{s}", .{line});
+
+        if (line.len == 0) break; // EOF
+        const line_copy = try state.allocator.alloc(u8, line.len);
+        std.mem.copyForwards(u8, line_copy, line);
+        try state.rows.append(Row{ .content = line, .render = line_copy });
     }
+
+    // var reader = std.fs.File.reader(file);
+    // while (try reader.readUntilDelimiterOrEofAlloc(state.allocator, '\n', 1024)) |line| {
+    //     const line_copy = try state.allocator.alloc(u8, line.len);
+    //     std.mem.copyForwards(u8, line_copy, line);
+    //     try state.rows.append(Row{ .content = line, .render = line_copy });
+    // }
 }
 
 pub fn main() !void {
-    const stdin = std.io.getStdIn();
-    const reader = stdin.reader().any();
-    const writer = std.io.getStdOut().writer().any();
+    const stdin = std.fs.File.stdin();
+    const stdout = std.fs.File.stdout();
+    var stdin_buffer: [1024]u8 = undefined;
+    // var stdout_buffer: [1024]u8 = undefined;
+    var reader = stdin.reader(&stdin_buffer);
+    // const writer = stdout.writer(&stdout_buffer);
+
+    // const reader = std.io.bufferedReader(stdin.readerStreaming(&stdin_buffer));
+    // const writer = std.fs.File.stdout();
 
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
 
     const handle = stdin.handle;
     try enableRawMode(handle);
-    try initEditor(&writer, arena.allocator());
+    try initEditor(&stdout, arena.allocator());
     if (std.os.argv.len > 1) {
         try editorOpen(std.mem.span(std.os.argv[1]));
     }
@@ -323,12 +359,12 @@ pub fn main() !void {
     };
 
     // I am not sure whether this will clear the error message or not.
-    errdefer editorRefreshScreen(&writer) catch |err| {
+    errdefer editorRefreshScreen(&stdout) catch |err| {
         std.debug.print("Failed to clear screen: {}", .{err});
     };
 
     while (true) {
-        try editorRefreshScreen(&writer);
+        try editorRefreshScreen(&stdout);
         if (!try editorProcessKeypress(&reader)) {
             break;
         }
