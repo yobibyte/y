@@ -1,3 +1,8 @@
+// Best code editor ever.
+
+// TODO: I probably want to get rid of the arena allocator and do the memory management manually.
+// An alternative, read on what people do to manage memory with the arena allocator.
+
 const std = @import("std");
 const config = @import("config.zig");
 const posix = std.posix;
@@ -105,7 +110,10 @@ const EditorState = struct {
     rows: std.array_list.Managed(*Row),
     rowoffset: usize,
     coloffset: usize,
-    filename: [] const u8,
+    filename: []const u8,
+    // Tutorial has a status message row, but I do find it useful.
+    // Maybe I will add it in the future.
+    // statusmsg: [80] const u8,
 };
 var state: EditorState = undefined;
 
@@ -297,7 +305,7 @@ fn editorDrawStatusBar(str_buffer: *String) !void {
 
     // Reserve space for lines.
     var lbuffer: [100]u8 = undefined;
-    const lines = try std.fmt.bufPrint(&lbuffer, " {d}/{d}", .{state.cy + 1, state.rows.items.len});
+    const lines = try std.fmt.bufPrint(&lbuffer, " {d}/{d}", .{ state.cy + 1, state.rows.items.len });
 
     const emptyspots = state.screencols - lines.len;
 
@@ -314,8 +322,8 @@ fn editorDrawStatusBar(str_buffer: *String) !void {
 
     const nspaces = emptyspots - fname.len;
     if (nspaces > 0) {
-       const spaces_mem = try state.allocator.alloc(u8, nspaces);
-       @memset(spaces_mem, ' ');
+        const spaces_mem = try state.allocator.alloc(u8, nspaces);
+        @memset(spaces_mem, ' ');
         try str_buffer.append(spaces_mem);
     }
 
