@@ -105,6 +105,7 @@ const EditorState = struct {
     rows: std.array_list.Managed(*Row),
     rowoffset: usize,
     coloffset: usize,
+    filename: [] const u8,
 };
 var state: EditorState = undefined;
 
@@ -245,6 +246,7 @@ fn editorRefreshScreen(writer: *const std.fs.File) !void {
     try str_buf.append("\x1b[?25l");
     try str_buf.append("\x1b[H");
     try editorDrawRows(&str_buf);
+    try editorDrawStatusBar(&str_buf);
     var buf: [20]u8 = undefined;
     const escape_code = try std.fmt.bufPrint(&buf, "\x1b[{d};{d}H", .{ state.cy - state.rowoffset + 1, state.rx - state.coloffset + 1 });
     try str_buf.append(escape_code);
@@ -284,10 +286,41 @@ fn editorDrawRows(str_buffer: *String) !void {
             }
         }
         try str_buffer.append("\x1b[K");
-        if (row != state.screenrows - 1) {
-            try str_buffer.append("\r\n");
-        }
+        try str_buffer.append("\r\n");
     }
+}
+
+// FIXME: when we move to the end of the file, we move onto the status bar.
+// This should not happen, we should do some boundary check somewhere.
+fn editorDrawStatusBar(str_buffer: *String) !void {
+    try str_buffer.append("\x1b[7m");
+
+    // Reserve space for lines.
+    var lbuffer: [100]u8 = undefined;
+    const lines = try std.fmt.bufPrint(&lbuffer, " {d}/{d}", .{state.cy + 1, state.rows.items.len});
+
+    const emptyspots = state.screencols - lines.len;
+
+    // FIXME:
+    // Are we off-by-one? For some reason status line is not printed for the rightmost column.
+    // Or are we setting numcolumns wrong?
+
+    // Should we truncate from the left? What does vim do?
+    var fname = state.filename;
+    if (fname.len > emptyspots) {
+        fname = fname[0..emptyspots];
+    }
+    try str_buffer.append(fname);
+
+    const nspaces = emptyspots - fname.len;
+    if (nspaces > 0) {
+       const spaces_mem = try state.allocator.alloc(u8, nspaces);
+       @memset(spaces_mem, ' ');
+        try str_buffer.append(spaces_mem);
+    }
+
+    try str_buffer.append(lines);
+    try str_buffer.append("\x1b[m");
 }
 
 fn editorMoveCursor(key: u16) void {
@@ -355,9 +388,6 @@ fn getWindowSize(writer: *const std.fs.File) ![2]usize {
 }
 
 fn initEditor(writer: *const std.fs.File, allocator: std.mem.Allocator) !void {
-    const ws = try getWindowSize(writer);
-    state.screenrows = ws[0];
-    state.screencols = ws[1];
     state.allocator = allocator;
     state.cx = 0;
     state.rx = 0;
@@ -365,6 +395,10 @@ fn initEditor(writer: *const std.fs.File, allocator: std.mem.Allocator) !void {
     state.rows = std.array_list.Managed(*Row).init(allocator);
     state.rowoffset = 0;
     state.coloffset = 0;
+    const ws = try getWindowSize(writer);
+    state.screenrows = ws[0];
+    state.screencols = ws[1] - 1;
+    state.filename = "[No name]";
 }
 
 fn editorOpen(fname: []const u8) !void {
@@ -385,6 +419,7 @@ fn editorOpen(fname: []const u8) !void {
         const content = try state.allocator.dupe(u8, line);
         try state.rows.append(try Row.init(content));
     }
+    state.filename = try state.allocator.dupe(u8, fname);
 }
 
 pub fn main() !void {
