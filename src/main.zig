@@ -41,6 +41,7 @@ const String = struct {
     fn free(self: *String) void {
         self.allocator.free(self.data);
     }
+
 };
 
 const Row = struct {
@@ -57,11 +58,14 @@ const Row = struct {
             }
         }
         // We already have 1 byte in the content, subtract from the width.
+        // This is the maximum number of memory we'll use.
         self.render = try state.allocator.alloc(u8, content.len + tabs * (config.TAB_WIDTH - 1));
         var render_idx: usize = 0;
         for (content) |c| {
             if (c == '\t') {
-                for (0..config.TAB_WIDTH) |_| {
+                self.render[render_idx] = ' ';
+                render_idx += 1;
+                while (render_idx % config.TAB_WIDTH != 0) {
                     self.render[render_idx] = ' ';
                     render_idx += 1;
                 }
@@ -70,8 +74,24 @@ const Row = struct {
                 render_idx += 1;
             }
         }
+        self.render = self.render[0..render_idx];
 
         return self;
+    }
+
+    // I am not sure if I want to support tabs at all.
+    // I can prob just get rid of this functionality and always render tabs as spaces.
+    fn cxToRx(self: *Row, cx: usize) usize {
+        var rx: usize = 0;
+
+        for (self.content[0..cx]) |c| {
+            if (c == '\t') {
+                rx += (config.TAB_WIDTH - 1) - (rx % config.TAB_WIDTH);
+            }
+            rx+=1;
+        }
+
+        return rx;
     }
 };
 
@@ -82,6 +102,7 @@ const EditorState = struct {
     screencols: usize,
     cx: usize,
     cy: usize, // y coordinate in the file frame of reference.
+    rx: usize, // render x coordinate.
     rows: std.array_list.Managed(*Row),
     rowoffset: usize,
     coloffset: usize,
@@ -188,17 +209,22 @@ fn editorProcessKeypress(reader: *std.fs.File.Reader) !bool {
 }
 
 fn editorScroll() void {
+    state.rx = 0;
+    if (state.cy < state.rows.items.len) {
+        state.rx = state.rows.items[state.cy].cxToRx(state.cx);
+    }
+
     if (state.cy < state.rowoffset) {
         state.rowoffset = state.cy;
     }
     if (state.cy >= state.rowoffset + state.screenrows) {
         state.rowoffset = state.cy - state.screenrows + 1;
     }
-    if (state.cx < state.coloffset) {
-        state.coloffset = state.cx;
+    if (state.rx < state.coloffset) {
+        state.coloffset = state.rx;
     }
-    if (state.cx >= state.coloffset + state.screencols) {
-        state.coloffset = state.cx - state.screencols + 1;
+    if (state.rx >= state.coloffset + state.screencols) {
+        state.coloffset = state.rx - state.screencols + 1;
     }
 }
 fn editorRefreshScreen(writer: *const std.fs.File) !void {
@@ -211,7 +237,8 @@ fn editorRefreshScreen(writer: *const std.fs.File) !void {
     try str_buf.append("\x1b[H");
     try editorDrawRows(&str_buf);
     var buf: [20]u8 = undefined;
-    const escape_code = try std.fmt.bufPrint(&buf, "\x1b[{d};{d}H", .{ state.cy - state.rowoffset + 1, state.cx - state.coloffset + 1 });
+    // TODO: Step 88 is next.
+    const escape_code = try std.fmt.bufPrint(&buf, "\x1b[{d};{d}H", .{ state.cy - state.rowoffset + 1, state.rx - state.coloffset + 1 });
     try str_buf.append(escape_code);
 
     try str_buf.append("\x1b[?25h");
@@ -325,6 +352,7 @@ fn initEditor(writer: *const std.fs.File, allocator: std.mem.Allocator) !void {
     state.screencols = ws[1];
     state.allocator = allocator;
     state.cx = 0;
+    state.rx = 0;
     state.cy = 0;
     state.rows = std.array_list.Managed(*Row).init(allocator);
     state.rowoffset = 0;
