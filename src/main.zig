@@ -313,14 +313,13 @@ fn editorMoveCursor(key: u16) void {
         KEY_RIGHT => {
             if (state.cy < state.rows.items.len) {
                 if (state.cx < state.rows.items[state.cy].content.len) {
-                    state.cx+=1;
+                    state.cx += 1;
                 }
             }
         },
         else => return,
     }
     const rowlen = if (state.cy < state.rows.items.len) state.rows.items[state.cy].content.len else 0;
-    // std.debug.print("{d}, {d}, {d}, {d}\n", .{rowlen, state.cx, state.rx, state.cy});
     if (state.cx > rowlen) {
         state.cx = rowlen;
     }
@@ -387,7 +386,8 @@ fn editorOpen(fname: []const u8) !void {
                 else => return err,
             }
         };
-        try state.rows.append(try Row.init(line));
+        const content = try state.allocator.dupe(u8, line);
+        try state.rows.append(try Row.init(content));
     }
 }
 
