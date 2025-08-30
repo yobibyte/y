@@ -5,6 +5,7 @@ const posix = std.posix;
 // But I do not want to create an element for every char.
 // Maybe there is a better way, but for now I'll keep it as is.
 // Give the keys values above char levels to use actual chars to edit text.
+const TAB_WIDTH = 4;
 const KEY_UP = 1000;
 const KEY_DOWN = 1001;
 const KEY_LEFT = 1002;
@@ -46,8 +47,31 @@ const Row = struct {
     content: []u8,
     render: []u8,
 
-    fn len(self: *Row) usize {
-        return self.content.len;
+    fn init(content: []u8) !*Row {
+        var self = try state.allocator.create(Row);
+        self.content = content;
+        var tabs: usize = 0;
+        for (content) |c| {
+            if (c == '\t') {
+                tabs += 1;
+            }
+        }
+        // We already have 1 byte in the content, subtract from the width.
+        self.render = try state.allocator.alloc(u8, content.len + tabs * (TAB_WIDTH - 1));
+        var render_idx: usize = 0;
+        for (content) |c| {
+            if (c == '\t') {
+                for (0..TAB_WIDTH) |_| {
+                    self.render[render_idx] = ' ';
+                    render_idx += 1;
+                }
+            } else {
+                self.render[render_idx] = c;
+                render_idx += 1;
+            }
+        }
+
+        return self;
     }
 };
 
@@ -58,7 +82,7 @@ const EditorState = struct {
     screencols: usize,
     cx: usize,
     cy: usize, // y coordinate in the file frame of reference.
-    rows: std.array_list.Managed(Row),
+    rows: std.array_list.Managed(*Row),
     rowoffset: usize,
     coloffset: usize,
 };
@@ -155,7 +179,7 @@ fn editorProcessKeypress(reader: *std.fs.File.Reader) !bool {
         },
         KEY_END => {
             if (state.cy < state.rows.items.len) {
-                state.cx = state.rows.items[state.cy].len();
+                state.cx = state.rows.items[state.cy].render.len;
             }
         },
         else => {},
@@ -250,14 +274,14 @@ fn editorMoveCursor(key: u16) void {
         },
         KEY_RIGHT => {
             if (state.cy < state.rows.items.len) {
-                if (state.cx < state.rows.items[state.cy].len()) {
+                if (state.cx < state.rows.items[state.cy].render.len) {
                     state.cx += 1;
                 }
             }
         },
         else => return,
     }
-    const rowlen = if (state.cy < state.rows.items.len) state.rows.items[state.cy].len() else 0;
+    const rowlen = if (state.cy < state.rows.items.len) state.rows.items[state.cy].render.len else 0;
     if (state.cx > rowlen) {
         state.cx = rowlen;
     }
@@ -302,7 +326,7 @@ fn initEditor(writer: *const std.fs.File, allocator: std.mem.Allocator) !void {
     state.allocator = allocator;
     state.cx = 0;
     state.cy = 0;
-    state.rows = std.array_list.Managed(Row).init(allocator);
+    state.rows = std.array_list.Managed(*Row).init(allocator);
     state.rowoffset = 0;
     state.coloffset = 0;
 }
@@ -323,9 +347,7 @@ fn editorOpen(fname: []const u8) !void {
                 else => return err,
             }
         };
-        const line_copy = try state.allocator.alloc(u8, line.len);
-        std.mem.copyForwards(u8, line_copy, line);
-        try state.rows.append(Row{ .content = line, .render = line_copy });
+        try state.rows.append(try Row.init(line));
     }
 }
 
@@ -333,12 +355,7 @@ pub fn main() !void {
     const stdin = std.fs.File.stdin();
     const stdout = std.fs.File.stdout();
     var stdin_buffer: [1024]u8 = undefined;
-    // var stdout_buffer: [1024]u8 = undefined;
     var reader = stdin.reader(&stdin_buffer);
-    // const writer = stdout.writer(&stdout_buffer);
-
-    // const reader = std.io.bufferedReader(stdin.readerStreaming(&stdin_buffer));
-    // const writer = std.fs.File.stdout();
 
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
