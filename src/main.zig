@@ -41,7 +41,6 @@ const String = struct {
     fn free(self: *String) void {
         self.allocator.free(self.data);
     }
-
 };
 
 const Row = struct {
@@ -88,7 +87,7 @@ const Row = struct {
             if (c == '\t') {
                 rx += (config.TAB_WIDTH - 1) - (rx % config.TAB_WIDTH);
             }
-            rx+=1;
+            rx += 1;
         }
 
         return rx;
@@ -222,7 +221,6 @@ fn editorScroll() void {
     state.rx = 0;
     if (state.cy < state.rows.items.len) {
         state.rx = state.rows.items[state.cy].cxToRx(state.cx);
-        std.debug.print("{d}, {d}\n", .{state.cx, state.rx});
     }
 
     if (state.cy < state.rowoffset) {
@@ -239,7 +237,6 @@ fn editorScroll() void {
     }
 }
 fn editorRefreshScreen(writer: *const std.fs.File) !void {
-    std.debug.print("YO {d}", .{state.rows.items.len});
     editorScroll();
     var str_buf = String{ .data = "", .allocator = state.allocator };
     //TODO: Does this release the memory in the ArenaAllocator?
@@ -371,7 +368,6 @@ fn initEditor(writer: *const std.fs.File, allocator: std.mem.Allocator) !void {
 }
 
 fn editorOpen(fname: []const u8) !void {
-    std.debug.print("{s}", .{fname});
     const file = try std.fs.cwd().openFile(fname, .{ .mode = .read_only });
     defer file.close();
 
