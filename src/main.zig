@@ -191,6 +191,14 @@ fn editorProcessKeypress(reader: *std.fs.File.Reader) !bool {
         ctrlKey('q') => return false,
         KEY_UP, KEY_DOWN, KEY_RIGHT, KEY_LEFT => editorMoveCursor(c),
         KEY_PGUP, KEY_PGDOWN => {
+            if (c == KEY_PGUP) {
+                state.cy = state.rowoffset;
+            } else {
+                state.cy = state.rowoffset + state.screenrows - 1;
+                if (state.cy > state.rows.items.len) {
+                    state.cy = state.rows.items.len;
+                }
+            }
             for (0..state.screenrows) |_| {
                 editorMoveCursor(if (c == KEY_PGUP) KEY_UP else KEY_DOWN);
             }
@@ -198,11 +206,13 @@ fn editorProcessKeypress(reader: *std.fs.File.Reader) !bool {
         KEY_HOME => {
             state.cx = 0;
         },
+        // FIXME: if there's a tab, we do not properly jump to line end.
         KEY_END => {
             if (state.cy < state.rows.items.len) {
-                state.cx = state.rows.items[state.cy].render.len;
+                state.cx = state.rows.items[state.cy].content.len;
             }
         },
+
         else => {},
     }
     return true;
@@ -212,6 +222,7 @@ fn editorScroll() void {
     state.rx = 0;
     if (state.cy < state.rows.items.len) {
         state.rx = state.rows.items[state.cy].cxToRx(state.cx);
+        std.debug.print("{d}, {d}\n", .{state.cx, state.rx});
     }
 
     if (state.cy < state.rowoffset) {
@@ -228,6 +239,7 @@ fn editorScroll() void {
     }
 }
 fn editorRefreshScreen(writer: *const std.fs.File) !void {
+    std.debug.print("YO {d}", .{state.rows.items.len});
     editorScroll();
     var str_buf = String{ .data = "", .allocator = state.allocator };
     //TODO: Does this release the memory in the ArenaAllocator?
@@ -237,7 +249,6 @@ fn editorRefreshScreen(writer: *const std.fs.File) !void {
     try str_buf.append("\x1b[H");
     try editorDrawRows(&str_buf);
     var buf: [20]u8 = undefined;
-    // TODO: Step 88 is next.
     const escape_code = try std.fmt.bufPrint(&buf, "\x1b[{d};{d}H", .{ state.cy - state.rowoffset + 1, state.rx - state.coloffset + 1 });
     try str_buf.append(escape_code);
 
@@ -301,14 +312,15 @@ fn editorMoveCursor(key: u16) void {
         },
         KEY_RIGHT => {
             if (state.cy < state.rows.items.len) {
-                if (state.cx < state.rows.items[state.cy].render.len) {
-                    state.cx += 1;
+                if (state.cx < state.rows.items[state.cy].content.len) {
+                    state.cx+=1;
                 }
             }
         },
         else => return,
     }
-    const rowlen = if (state.cy < state.rows.items.len) state.rows.items[state.cy].render.len else 0;
+    const rowlen = if (state.cy < state.rows.items.len) state.rows.items[state.cy].content.len else 0;
+    // std.debug.print("{d}, {d}, {d}, {d}\n", .{rowlen, state.cx, state.rx, state.cy});
     if (state.cx > rowlen) {
         state.cx = rowlen;
     }
@@ -405,6 +417,7 @@ pub fn main() !void {
 
     while (true) {
         try editorRefreshScreen(&stdout);
+        // editorScroll();
         if (!try editorProcessKeypress(&reader)) {
             break;
         }
