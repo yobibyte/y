@@ -33,7 +33,7 @@ const welcome_msg = "yobibyte's text editor, version " ++ zon.version ++ ".";
 
 const String = struct {
     data: []const u8,
-    allocator: std.mem.Allocator,
+    allocator: *const std.mem.Allocator,
 
     fn append(self: *String, other: []const u8) !void {
         const new_data = try self.allocator.alloc(u8, self.data.len + other.len);
@@ -245,10 +245,9 @@ fn editorScroll() void {
         state.coloffset = state.rx - state.screencols + 1;
     }
 }
-fn editorRefreshScreen(writer: *const std.fs.File) !void {
+fn editorRefreshScreen(writer: *const std.fs.File, string_allocator: *const std.mem.Allocator) !void {
     editorScroll();
-    var str_buf = String{ .data = "", .allocator = state.allocator };
-    //TODO: Does this release the memory in the ArenaAllocator?
+    var str_buf = String{ .data = "", .allocator = string_allocator};
     defer str_buf.free();
 
     try str_buf.append("\x1b[?25l");
@@ -439,6 +438,14 @@ pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
 
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    const allocator = gpa.allocator();
+    defer switch (gpa.deinit()) {
+        .leak => std.debug.panic("Some memory leaked!", .{}),
+        .ok => {},
+    };
+
+
     const handle = stdin.handle;
     try enableRawMode(handle);
     try initEditor(&stdout, arena.allocator());
@@ -450,13 +457,12 @@ pub fn main() !void {
     };
 
     // I am not sure whether this will clear the error message or not.
-    errdefer editorRefreshScreen(&stdout) catch |err| {
+    errdefer editorRefreshScreen(&stdout, &allocator) catch |err| {
         std.debug.print("Failed to clear screen: {}", .{err});
     };
 
     while (true) {
-        try editorRefreshScreen(&stdout);
-        // editorScroll();
+        try editorRefreshScreen(&stdout, &allocator);
         if (!try editorProcessKeypress(&reader)) {
             break;
         }
