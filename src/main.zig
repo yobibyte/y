@@ -1,11 +1,11 @@
 const std = @import("std");
+const config = @import("config.zig");
 const posix = std.posix;
 
 // In the original tutorial, this is a enum.
 // But I do not want to create an element for every char.
 // Maybe there is a better way, but for now I'll keep it as is.
 // Give the keys values above char levels to use actual chars to edit text.
-const TAB_WIDTH = 4;
 const KEY_UP = 1000;
 const KEY_DOWN = 1001;
 const KEY_LEFT = 1002;
@@ -57,11 +57,11 @@ const Row = struct {
             }
         }
         // We already have 1 byte in the content, subtract from the width.
-        self.render = try state.allocator.alloc(u8, content.len + tabs * (TAB_WIDTH - 1));
+        self.render = try state.allocator.alloc(u8, content.len + tabs * (config.TAB_WIDTH - 1));
         var render_idx: usize = 0;
         for (content) |c| {
             if (c == '\t') {
-                for (0..TAB_WIDTH) |_| {
+                for (0..config.TAB_WIDTH) |_| {
                     self.render[render_idx] = ' ';
                     render_idx += 1;
                 }
