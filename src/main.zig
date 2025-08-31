@@ -1,4 +1,37 @@
-// Best code editor ever.
+//  Best code editor ever.
+//
+//                     (/, .#
+//                  ((//**,#((/#%.%%#//
+//              &#%&#((%&%########((/,,,/
+//           (#(@#(%%%%&&&%%%%######(((//,
+//          %%%%&%%%%%#&&&%&%%#%%#####(((///
+//       &&&&%#&#//&&&@@&&&&%%####((((((((//*,
+//      %@&@&%&@(/(&&&@@&&&%%%###((((((((((////
+//    .%&@&#%&(#%(/%&@@@@@&&%%%###((((((((/////*//
+//   &&&@%(&&*#(#/%&@@@@@@&&%%%###((((((((((////*(*
+//  #%&&%%#&/(/%#(@@@@@@&&%%%##(((((/((((///////,//
+//  #%%%(#@(#(/*(@@@@@%%%%(/***//((/(((///**//(,**,*
+//  &&&#%%@%((//&@@@%%%/@%(/(***/##(((**/////*/,,,*
+//  #&@%%#(##(#%@@@&%(#&%#/(((/(#&&%(*,////**,//(///
+// @&%#&@#*((*&@@@&&&&%%&#(((%&@@@@&(((/(//((((/((*
+//  %#&%%(&((#&@@&&&&%###%%%##@@&%(//**(##(((((/*,
+//   &%#/(%&%@%@@&&&&%%%%#(((**,,,/**,**/((#((//
+//    ###&@@&&%&&@@&&&%%#(((##%&&%(/##(((/(((/(/
+//     /(&#(#@%&%(%&%#&##(&&@&&%(#((#/((((((/((*(
+//       @&@&@(((##@&&%#&@&%#/*.......*,,/(/(/(//
+//       &&&&@@&(#(@@#@&@##(*.*//////// .(((((((((
+//       @&&#&@@###%##&##(,*((((##((((((/*(//((***
+//        ,/&%#@(/(#&&&%#///((((##((///(/*//((((*
+//         (#&@((,%%&&%%#((/((/#(///(**(/((*//((/
+//       ,&&%&%#(@%&/&#((#(//(/(*/(#&%((**//((//
+//      &&&&&&%%@@*/*%(##(((##(/&(%&/,(((/((**(
+//      %&&&&&%%%@##*%##(#####&&(((,((((/(((((
+//      &&&&&&&&&%%%&####((##&##(**(/*/((/(/,
+//      %&&&&&%%%#%###(#%(((##(*//.*/(*,*/(/,
+//       *%&%%#%#%%%%&(%%///,*%((((/(((,,,.(*
+//         (%#(/%#%&%#%%/,*//,(#%(/(/(((.((/
+//            /#%&%#%##////(#%(@%*,,*/*/.(
+//                 /(/#(((/*/#****/*,/*.
 
 // TODO: I probably want to get rid of the arena allocator and do the memory management manually.
 // An alternative, read on what people do to manage memory with the arena allocator.
@@ -247,7 +280,7 @@ fn editorScroll() void {
 }
 fn editorRefreshScreen(writer: *const std.fs.File, string_allocator: *const std.mem.Allocator) !void {
     editorScroll();
-    var str_buf = String{ .data = "", .allocator = string_allocator};
+    var str_buf = String{ .data = "", .allocator = string_allocator };
     defer str_buf.free();
 
     try str_buf.append("\x1b[?25l");
@@ -297,8 +330,6 @@ fn editorDrawRows(str_buffer: *String) !void {
     }
 }
 
-// FIXME: when we move to the end of the file, we move onto the status bar.
-// This should not happen, we should do some boundary check somewhere.
 fn editorDrawStatusBar(str_buffer: *String) !void {
     try str_buffer.append("\x1b[7m");
 
@@ -403,8 +434,8 @@ fn initEditor(writer: *const std.fs.File, allocator: std.mem.Allocator) !void {
     state.rowoffset = 0;
     state.coloffset = 0;
     const ws = try getWindowSize(writer);
-    state.screenrows = ws[0];
-    state.screencols = ws[1] - 1;
+    state.screenrows = ws[0] - 1;
+    state.screencols = ws[1];
     state.filename = "[No name]";
 }
 
@@ -444,7 +475,6 @@ pub fn main() !void {
         .leak => std.debug.panic("Some memory leaked!", .{}),
         .ok => {},
     };
-
 
     const handle = stdin.handle;
     try enableRawMode(handle);
