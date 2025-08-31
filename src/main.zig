@@ -347,9 +347,18 @@ fn editorProcessKeypress(reader: *std.fs.File.Reader) !bool {
             if (c == KEY_DEL) {
                 // TODO: this behaves incorrectly for the rightmost character now.
                 // We should be joining the two rows in here in the insert mode.
-                editorMoveCursor(KEY_RIGHT);
+                if (state.cy < state.rows.items.len) {
+                    if (state.cx == state.rows.items[state.cy].content.len) {
+                        state.cx = 0;
+                        editorMoveCursor(KEY_DOWN);
+                    } else {
+                        editorMoveCursor(KEY_RIGHT);
+                    }
+                    try editorDelCharToLeft();
+                }
+            } else {
+                try editorDelCharToLeft();
             }
-            try editorDelCharToLeft();
         },
         KEY_PGUP, KEY_PGDOWN => {
             if (c == KEY_PGUP) {
@@ -675,14 +684,14 @@ fn editorInsertNewLine() !void {
     if (state.cx == 0) {
         try editorInsertRow(state.cy, "");
     } else {
-        var row = state.rows.items[state.cy]; 
-        try editorInsertRow(state.cy+1, row.content[state.cx..]);
+        var row = state.rows.items[state.cy];
+        try editorInsertRow(state.cy + 1, row.content[state.cx..]);
         row.content = row.content[0..state.cx];
         try row.update();
     }
-    state.cy+=1;
-    state.cx=0;
-    state.dirty+=1;
+    state.cy += 1;
+    state.cx = 0;
+    state.dirty += 1;
 }
 
 pub fn main() !void {
