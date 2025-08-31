@@ -160,6 +160,7 @@ const Row = struct {
         self.content = new_content;
 
         try self.update();
+        state.dirty += 1;
     }
 };
 
@@ -177,6 +178,9 @@ const EditorState = struct {
     filename: ?[]const u8,
     statusmsg: []const u8,
     statusmsg_time: i64,
+    // Can do with a bool now, but probably will be useful for tracking undo.
+    // Probably, with the undo file, we can make it signed, but I will change it later.
+    dirty: u64,
 
     fn rowsToString(self: *EditorState) ![]u8 {
         var total_len: usize = 0;
@@ -199,6 +203,23 @@ const EditorState = struct {
         // With the arena allocator I do not actually care who frees this.
         // But I need to figure out what to do when I move to gpa.
         return buf;
+    }
+
+    fn reset(self: *EditorState, writer: *const std.fs.File, allocator: std.mem.Allocator) !void {
+        self.allocator = allocator;
+        self.cx = 0;
+        self.rx = 0;
+        self.cy = 0;
+        self.rows = std.array_list.Managed(*Row).init(allocator);
+        self.rowoffset = 0;
+        self.coloffset = 0;
+        const ws = try getWindowSize(writer);
+        self.screenrows = ws[0] - 2;
+        self.screencols = ws[1];
+        self.filename = null;
+        self.statusmsg = "";
+        self.statusmsg_time = 0;
+        self.dirty = 0;
     }
 };
 var state: EditorState = undefined;
@@ -417,14 +438,18 @@ fn editorDrawStatusBar(str_buffer: *String) !void {
     var lbuffer: [100]u8 = undefined;
     const lines = try std.fmt.bufPrint(&lbuffer, " {d}/{d}", .{ state.cy + 1, state.rows.items.len });
 
-    const emptyspots = state.screencols - lines.len;
+    const mod_string = if (state.dirty > 0) " (modified)" else "";
+    const emptyspots = state.screencols - lines.len - mod_string.len;
 
     // Should we truncate from the left? What does vim do?
-    var fname = state.filename orelse "[No name]";
+    var fname = state.filename orelse "[no name]";
     if (fname.len > emptyspots) {
         fname = fname[0..emptyspots];
     }
     try str_buffer.append(fname);
+    try str_buffer.append(mod_string);
+    // TODO: Do the above properly with formatting.
+    // Learn how to set the max field width dynamically in zig.
 
     const nspaces = emptyspots - fname.len;
     if (nspaces > 0) {
@@ -502,22 +527,6 @@ fn getWindowSize(writer: *const std.fs.File) ![2]usize {
     }
 }
 
-fn initEditor(writer: *const std.fs.File, allocator: std.mem.Allocator) !void {
-    state.allocator = allocator;
-    state.cx = 0;
-    state.rx = 0;
-    state.cy = 0;
-    state.rows = std.array_list.Managed(*Row).init(allocator);
-    state.rowoffset = 0;
-    state.coloffset = 0;
-    const ws = try getWindowSize(writer);
-    state.screenrows = ws[0] - 2;
-    state.screencols = ws[1];
-    state.filename = null;
-    state.statusmsg = "";
-    state.statusmsg_time = 0;
-}
-
 fn editorOpen(fname: []const u8) !void {
     // FIXME, this fails
     const file = try std.fs.cwd().openFile(fname, .{ .mode = .read_only });
@@ -537,11 +546,14 @@ fn editorOpen(fname: []const u8) !void {
         try editorAppendRow(line);
     }
     state.filename = try state.allocator.dupe(u8, fname);
+    // AppendRow modifies the dirty counter -> reset.
+    state.dirty = 0;
 }
 
 fn editorAppendRow(line: []const u8) !void {
     const content = try state.allocator.dupe(u8, line);
     try state.rows.append(try Row.init(content));
+    state.dirty += 1;
 }
 
 fn editorInsertChar(c: u8) !void {
@@ -596,7 +608,7 @@ pub fn main() !void {
 
     const handle = stdin.handle;
     try enableRawMode(handle);
-    try initEditor(&stdout, arena.allocator());
+    try state.reset(&stdout, arena.allocator());
     if (std.os.argv.len > 1) {
         try editorOpen(std.mem.span(std.os.argv[1]));
     }
