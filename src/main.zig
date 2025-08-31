@@ -1,4 +1,3 @@
-//  Best code editor ever.
 //
 //                     (/, .#
 //                  ((//**,#((/#%.%%#//
@@ -11,14 +10,14 @@
 //   &&&@%(&&*#(#/%&@@@@@@&&%%%###((((((((((////*(*
 //  #%&&%%#&/(/%#(@@@@@@&&%%%##(((((/((((///////,//
 //  #%%%(#@(#(/*(@@@@@%%%%(/***//((/(((///**//(,**,*
-//  &&&#%%@%((//&@@@%%%/@%(/(***/##(((**/////*/,,,*
-//  #&@%%#(##(#%@@@&%(#&%#/(((/(#&&%(*,////**,//(///
-// @&%#&@#*((*&@@@&&&&%%&#(((%&@@@@&(((/(//((((/((*
-//  %#&%%(&((#&@@&&&&%###%%%##@@&%(//**(##(((((/*,
-//   &%#/(%&%@%@@&&&&%%%%#(((**,,,/**,**/((#((//
-//    ###&@@&&%&&@@&&&%%#(((##%&&%(/##(((/(((/(/
-//     /(&#(#@%&%(%&%#&##(&&@&&%(#((#/((((((/((*(
-//       @&@&@(((##@&&%#&@&%#/*.......*,,/(/(/(//
+//  &&&#%%@%((//&@@@%%%/@%(/(***/##(((**/////*/,,,*     - - - - - - - - - - - -
+//  #&@%%#(##(#%@@@&%(#&%#/(((/(#&&%(*,////**,//(///   | Best code editor ever! |
+// @&%#&@#*((*&@@@&&&&%%&#(((%&@@@@&(((/(//((((/((*     - - - - - - - - - - - -
+//  %#&%%(&((#&@@&&&&%###%%%##@@&%(//**(##(((((/*,     /
+//   &%#/(%&%@%@@&&&&%%%%#(((**,,,/**,**/((#((//      /
+//    ###&@@&&%&&@@&&&%%#(((##%&&%(/##(((/(((/(/     /
+//     /(&#(#@%&%(%&%#&##(&&@&&%(#((#/((((((/((*(   /
+//       @&@&@(((##@&&%#&@&%#/*.......*,,/(/(/(//  /
 //       &&&&@@&(#(@@#@&@##(*.*//////// .(((((((((
 //       @&&#&@@###%##&##(,*((((##((((((/*(//((***
 //        ,/&%#@(/(#&&&%#///((((##((///(/*//((((*
@@ -88,17 +87,23 @@ const Row = struct {
     fn init(content: []u8) !*Row {
         var self = try state.allocator.create(Row);
         self.content = content;
+        try self.update();
+        return self;
+    }
+
+    fn update(self: *Row) !void {
         var tabs: usize = 0;
-        for (content) |c| {
+        for (self.content) |c| {
             if (c == '\t') {
                 tabs += 1;
             }
         }
+        // TODO: move render allocation to gpa instead of arena.
         // We already have 1 byte in the content, subtract from the width.
         // This is the maximum number of memory we'll use.
-        self.render = try state.allocator.alloc(u8, content.len + tabs * (config.TAB_WIDTH - 1));
+        self.render = try state.allocator.alloc(u8, self.content.len + tabs * (config.TAB_WIDTH - 1));
         var render_idx: usize = 0;
-        for (content) |c| {
+        for (self.content) |c| {
             if (c == '\t') {
                 self.render[render_idx] = ' ';
                 render_idx += 1;
@@ -112,8 +117,6 @@ const Row = struct {
             }
         }
         self.render = self.render[0..render_idx];
-
-        return self;
     }
 
     // I am not sure if I want to support tabs at all.
@@ -129,6 +132,33 @@ const Row = struct {
         }
 
         return rx;
+    }
+
+    fn insertChar(self: *Row, c: u8, at: usize) !void {
+        // I am not sure why the original tutorial used an int here.
+        // I will use a unsigned int here.
+        const oldsize = self.content.len;
+        var actual_at = at;
+        if (at > oldsize) {
+            actual_at = oldsize;
+        }
+        // I didn'make reallocate work. Figure this out.
+        // Probably after switch to the gpa.
+        // self.content = state.allocator.reallocate(self.content, oldsize+1);
+
+        const new_content = try state.allocator.alloc(u8, oldsize + 1);
+
+        if (actual_at > 0) {
+            std.mem.copyForwards(u8, new_content[0..actual_at], self.content[0..actual_at]);
+        }
+        new_content[actual_at] = c;
+        if (actual_at < oldsize) {
+            std.mem.copyForwards(u8, new_content[actual_at + 1 ..], self.content[actual_at..]);
+        }
+        state.allocator.free(self.content);
+        self.content = new_content;
+
+        try self.update();
     }
 };
 
@@ -254,7 +284,13 @@ fn editorProcessKeypress(reader: *std.fs.File.Reader) !bool {
             }
         },
 
-        else => {},
+        else => {
+            // 0 is EndOfStream in editorReadKey
+            if (c != 0) {
+                const casted_char = std.math.cast(u8, c) orelse return error.ValueTooBig;
+                try editorInsertChar(casted_char);
+            }
+        },
     }
     return true;
 }
@@ -450,10 +486,22 @@ fn editorOpen(fname: []const u8) !void {
                 else => return err,
             }
         };
-        const content = try state.allocator.dupe(u8, line);
-        try state.rows.append(try Row.init(content));
+        try editorAppendRow(line);
     }
     state.filename = try state.allocator.dupe(u8, fname);
+}
+
+fn editorAppendRow(line: []const u8) !void {
+    const content = try state.allocator.dupe(u8, line);
+    try state.rows.append(try Row.init(content));
+}
+
+fn editorInsertChar(c: u8) !void {
+    if (state.cy == state.rows.items.len) {
+        try editorAppendRow("");
+    }
+    try state.rows.items[state.cy].insertChar(c, state.cx);
+    state.cx += 1;
 }
 
 pub fn main() !void {
