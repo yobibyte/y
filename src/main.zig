@@ -226,7 +226,9 @@ pub fn enableRawMode(handle: posix.fd_t) !void {
     term.cc[@intFromEnum(posix.V.TIME)] = 1;
     try posix.tcsetattr(handle, .NOW, term);
 }
-pub fn disableRawMode(handle: posix.fd_t) !void {
+pub fn disableRawMode(handle: posix.fd_t, writer: *const std.fs.File) !void {
+    // Clear screen and move cursort to the top left.
+    try writer.writeAll("\x1b[H\x1b[2J");
     try posix.tcsetattr(handle, .NOW, state.orig_term);
 }
 
@@ -367,7 +369,6 @@ fn editorDrawRows(str_buffer: *String) !void {
     for (0..state.screenrows) |row| {
         const filerow = state.rowoffset + row;
         // Erase in line, by default, erases everything to the right of cursor.
-        // TODO: I wonder how these .len calls would behave with utf-8 chars.
         if (filerow >= state.rows.items.len) {
             if (state.rows.items.len == 0 and row == state.screenrows / 3) {
                 if (state.screencols - welcome_msg.len >= 0) {
@@ -540,11 +541,10 @@ fn editorInsertChar(c: u8) !void {
 fn editorSave() !void {
     // TODO: add a command to save to a filename if empty.
     const fname = state.filename orelse return;
-
     const buf = try state.rowsToString();
     const file = try std.fs.cwd().openFile(fname, .{ .mode = .write_only });
-    try file.writeAll(buf);
     defer file.close();
+    try file.writeAll(buf);
 }
 
 pub fn main() !void {
@@ -569,13 +569,9 @@ pub fn main() !void {
     if (std.os.argv.len > 1) {
         try editorOpen(std.mem.span(std.os.argv[1]));
     }
-    defer disableRawMode(handle) catch |err| {
-        std.debug.print("Failed to disable raw mode: {}", .{err});
-    };
 
-    // I am not sure whether this will clear the error message or not.
-    errdefer editorRefreshScreen(&stdout, &allocator) catch |err| {
-        std.debug.print("Failed to clear screen: {}", .{err});
+    defer disableRawMode(handle, &stdout) catch |err| {
+        std.debug.print("Failed to restore the original terminal mode: {}", .{err});
     };
 
     while (true) {
