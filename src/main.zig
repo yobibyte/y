@@ -80,7 +80,7 @@ const String = struct {
         self.allocator.free(self.data);
     }
 };
-
+// TODO: move Row to a separate file.
 const Row = struct {
     content: []u8,
     render: []u8,
