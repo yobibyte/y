@@ -181,6 +181,7 @@ const EditorState = struct {
     // Can do with a bool now, but probably will be useful for tracking undo.
     // Probably, with the undo file, we can make it signed, but I will change it later.
     dirty: u64,
+    confirm_to_quit: bool, // if set, quit without confirmation, reset when pressed Ctrl+Q once.
 
     fn rowsToString(self: *EditorState) ![]u8 {
         var total_len: usize = 0;
@@ -220,6 +221,7 @@ const EditorState = struct {
         self.statusmsg = "";
         self.statusmsg_time = 0;
         self.dirty = 0;
+        self.confirm_to_quit = true;
     }
 };
 var state: EditorState = undefined;
@@ -305,9 +307,17 @@ fn editorReadKey(reader: *std.fs.File.Reader) !u16 {
 fn editorProcessKeypress(reader: *std.fs.File.Reader) !bool {
     const c = try editorReadKey(reader);
     switch (c) {
+        0 => return true, // 0 is EndOfStream.
         // TODO
         '\r' => {},
-        ctrlKey('q') => return false,
+        ctrlKey('q') => {
+            if (state.dirty > 0 and state.confirm_to_quit) {
+                state.confirm_to_quit = false;
+                try editorSetStatusMessage("You have unsaved changes. Press Ctrl+Q again if you still want to quit.");
+                return true;
+            }
+            return false;
+        },
         KEY_UP, KEY_DOWN, KEY_RIGHT, KEY_LEFT => editorMoveCursor(c),
         // TODO
         KEY_BACKSPACE, KEY_DEL, ctrlKey('h') => {},
@@ -339,13 +349,12 @@ fn editorProcessKeypress(reader: *std.fs.File.Reader) !bool {
         ctrlKey('l'), '\x1b' => {},
 
         else => {
-            // 0 is EndOfStream in editorReadKey
-            if (c != 0) {
-                const casted_char = std.math.cast(u8, c) orelse return error.ValueTooBig;
-                try editorInsertChar(casted_char);
-            }
+            const casted_char = std.math.cast(u8, c) orelse return error.ValueTooBig;
+            try editorInsertChar(casted_char);
         },
     }
+    // Reset confirmation flag when any other key than Ctrl+q was typed.
+    state.confirm_to_quit = true;
     return true;
 }
 
@@ -580,6 +589,7 @@ fn editorSave() !void {
     var fmt_buf: [100]u8 = undefined;
     const success_msg = try std.fmt.bufPrint(&fmt_buf, "{d} bytes written to disk.", .{buf.len});
     try editorSetStatusMessage(success_msg);
+    state.dirty = 0;
 }
 
 fn editorSetStatusMessage(msg: []const u8) !void {
