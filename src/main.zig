@@ -339,10 +339,6 @@ fn editorDrawStatusBar(str_buffer: *String) !void {
 
     const emptyspots = state.screencols - lines.len;
 
-    // FIXME:
-    // Are we off-by-one? For some reason status line is not printed for the rightmost column.
-    // Or are we setting numcolumns wrong?
-
     // Should we truncate from the left? What does vim do?
     var fname = state.filename;
     if (fname.len > emptyspots) {
