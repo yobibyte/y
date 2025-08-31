@@ -11,7 +11,7 @@
 //  #%&&%%#&/(/%#(@@@@@@&&%%%##(((((/((((///////,//
 //  #%%%(#@(#(/*(@@@@@%%%%(/***//((/(((///**//(,**,*
 //  &&&#%%@%((//&@@@%%%/@%(/(***/##(((**/////*/,,,*     - - - - - - - - - - - -
-//  #&@%%#(##(#%@@@&%(#&%#/(((/(#&&%(*,////**,//(///   | Best code editor ever! |
+//  #&@%%#(##(#%@@@&%(#&%#/(((/(#&&%(*,////**,//(///   | Best text editor ever! |
 // @&%#&@#*((*&@@@&&&&%%&#(((%&@@@@&(((/(//((((/((*     - - - - - - - - - - - -
 //  %#&%%(&((#&@@&&&&%###%%%##@@&%(//**(##(((((/*,     /
 //   &%#/(%&%@%@@&&&&%%%%#(((**,,,/**,**/((#((//      /
@@ -43,6 +43,7 @@ const posix = std.posix;
 // But I do not want to create an element for every char.
 // Maybe there is a better way, but for now I'll keep it as is.
 // Give the keys values above char levels to use actual chars to edit text.
+const KEY_BACKSPACE = 127;
 const KEY_UP = 1000;
 const KEY_DOWN = 1001;
 const KEY_LEFT = 1002;
@@ -259,8 +260,12 @@ fn editorReadKey(reader: *std.fs.File.Reader) !u16 {
 fn editorProcessKeypress(reader: *std.fs.File.Reader) !bool {
     const c = try editorReadKey(reader);
     switch (c) {
+        // TODO
+        '\r' => {},
         ctrlKey('q') => return false,
         KEY_UP, KEY_DOWN, KEY_RIGHT, KEY_LEFT => editorMoveCursor(c),
+        // TODO
+        KEY_BACKSPACE, KEY_DEL, ctrlKey('h') => {},
         KEY_PGUP, KEY_PGDOWN => {
             if (c == KEY_PGUP) {
                 state.cy = state.rowoffset;
@@ -283,6 +288,9 @@ fn editorProcessKeypress(reader: *std.fs.File.Reader) !bool {
                 state.cx = state.rows.items[state.cy].content.len;
             }
         },
+
+        // TODO
+        ctrlKey('l'), '\x1b' => {},
 
         else => {
             // 0 is EndOfStream in editorReadKey
