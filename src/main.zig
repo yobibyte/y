@@ -175,9 +175,8 @@ const EditorState = struct {
     rowoffset: usize,
     coloffset: usize,
     filename: ?[]const u8,
-    // Tutorial has a status message row, but I do find it useful.
-    // Maybe I will add it in the future.
-    // statusmsg: [80] const u8,
+    statusmsg: []const u8,
+    statusmsg_time: i64,
 
     fn rowsToString(self: *EditorState) ![]u8 {
         var total_len: usize = 0;
@@ -357,6 +356,7 @@ fn editorRefreshScreen(writer: *const std.fs.File, string_allocator: *const std.
     try str_buf.append("\x1b[H");
     try editorDrawRows(&str_buf);
     try editorDrawStatusBar(&str_buf);
+    try editorDrawMessageBar(&str_buf);
     var buf: [20]u8 = undefined;
     const escape_code = try std.fmt.bufPrint(&buf, "\x1b[{d};{d}H", .{ state.cy - state.rowoffset + 1, state.rx - state.coloffset + 1 });
     try str_buf.append(escape_code);
@@ -399,6 +399,17 @@ fn editorDrawRows(str_buffer: *String) !void {
     }
 }
 
+fn editorDrawMessageBar(str_buffer: *String) !void {
+    try str_buffer.append("\x1b[K");
+    var msg = state.statusmsg;
+    if (state.statusmsg.len > state.screencols) {
+        msg = state.statusmsg[0..state.screencols];
+    }
+    if (state.statusmsg.len > 0 and std.time.timestamp() - state.statusmsg_time < config.STATUS_MSG_DURATION_SEC) {
+        try str_buffer.append(state.statusmsg);
+    }
+}
+
 fn editorDrawStatusBar(str_buffer: *String) !void {
     try str_buffer.append("\x1b[7m");
 
@@ -424,6 +435,7 @@ fn editorDrawStatusBar(str_buffer: *String) !void {
 
     try str_buffer.append(lines);
     try str_buffer.append("\x1b[m");
+    try str_buffer.append("\r\n");
 }
 
 fn editorMoveCursor(key: u16) void {
@@ -499,9 +511,11 @@ fn initEditor(writer: *const std.fs.File, allocator: std.mem.Allocator) !void {
     state.rowoffset = 0;
     state.coloffset = 0;
     const ws = try getWindowSize(writer);
-    state.screenrows = ws[0] - 1;
+    state.screenrows = ws[0] - 2;
     state.screencols = ws[1];
     state.filename = null;
+    state.statusmsg = "";
+    state.statusmsg_time = 0;
 }
 
 fn editorOpen(fname: []const u8) !void {
@@ -547,6 +561,14 @@ fn editorSave() !void {
     try file.writeAll(buf);
 }
 
+fn editorSetStatusMessage(msg: []const u8) void {
+    // There is some formatting magic in the tutorial version of this.
+    // I will start simpler.
+    // TODO: should I copy memory instead here?
+    state.statusmsg = msg;
+    state.statusmsg_time = std.time.timestamp();
+}
+
 pub fn main() !void {
     const stdin = std.fs.File.stdin();
     const stdout = std.fs.File.stdout();
@@ -569,6 +591,8 @@ pub fn main() !void {
     if (std.os.argv.len > 1) {
         try editorOpen(std.mem.span(std.os.argv[1]));
     }
+
+    editorSetStatusMessage("yobibyte's text editor");
 
     defer disableRawMode(handle, &stdout) catch |err| {
         std.debug.print("Failed to restore the original terminal mode: {}", .{err});
