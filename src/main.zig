@@ -162,6 +162,27 @@ const Row = struct {
         try self.update();
         state.dirty += 1;
     }
+
+    pub fn delChar(self: *Row, at: usize) void {
+        const rowlen = self.content.len;
+        if (at >= rowlen) {
+            return;
+        }
+        std.mem.copyForwards(u8, self.content[at..], self.content[at + 1 .. rowlen]);
+        self.content = self.content[0 .. rowlen - 1];
+    }
+
+    pub fn append(self: *Row, chunk: []u8) !void {
+        const new_content = try state.allocator.alloc(u8, self.content.len + chunk.len);
+        std.mem.copyForwards(u8, new_content[0..self.content.len], self.content);
+        std.mem.copyForwards(u8, new_content[self.content.len..], chunk);
+        // TODO: be careful when using gpa.
+        state.allocator.free(self.content);
+        self.content = new_content;
+
+        try self.update();
+        state.dirty += 1;
+    }
 };
 
 const EditorState = struct {
@@ -181,6 +202,8 @@ const EditorState = struct {
     // Can do with a bool now, but probably will be useful for tracking undo.
     // Probably, with the undo file, we can make it signed, but I will change it later.
     dirty: u64,
+    // TODO: Right now, if I add a char and remove it immediately, this will not reset the dirty.
+    // How do we address those?
     confirm_to_quit: bool, // if set, quit without confirmation, reset when pressed Ctrl+Q once.
 
     fn rowsToString(self: *EditorState) ![]u8 {
@@ -320,7 +343,14 @@ fn editorProcessKeypress(reader: *std.fs.File.Reader) !bool {
         },
         KEY_UP, KEY_DOWN, KEY_RIGHT, KEY_LEFT => editorMoveCursor(c),
         // TODO
-        KEY_BACKSPACE, KEY_DEL, ctrlKey('h') => {},
+        KEY_BACKSPACE, KEY_DEL, ctrlKey('h') => {
+            if (c == KEY_DEL) {
+                // TODO: this behaves incorrectly for the rightmost character now.
+                // We should be joining the two rows in here in the insert mode.
+                editorMoveCursor(KEY_RIGHT);
+            }
+            try editorDelCharToLeft();
+        },
         KEY_PGUP, KEY_PGDOWN => {
             if (c == KEY_PGUP) {
                 state.cy = state.rowoffset;
@@ -598,6 +628,42 @@ fn editorSetStatusMessage(msg: []const u8) !void {
     // simpler to some extent.
     state.statusmsg = try state.allocator.dupe(u8, msg);
     state.statusmsg_time = std.time.timestamp();
+}
+
+fn editorDelCharToLeft() !void {
+    if (state.cy == state.rows.items.len) {
+        return;
+    }
+    if (state.cx == 0 and state.cy == 0) {
+        return;
+    }
+    // How can it be smaller than zero?
+    var row = state.rows.items[state.cy];
+    if (state.cx > 0) {
+        state.rows.items[state.cy].delChar(state.cx - 1);
+        state.cx -= 1;
+    } else {
+        // Move cursor to the joint of two new rows.
+        var prev_row = state.rows.items[state.cy - 1];
+        state.cx = prev_row.content.len;
+        // Join the two rows.
+        try prev_row.append(state.rows.items[state.cy].content);
+        editorDelRow(state.cy); // Remove the current row
+        state.cy -= 1; // Move cursor up.
+    }
+    try row.update();
+    state.dirty += 1;
+}
+
+fn editorDelRow(at: usize) void {
+    if (at >= state.rows.items.len) {
+        return;
+    }
+    // TODO: be careful! When we move to gpa, this will leak memory.
+    // Free the row here.
+    // This function returns the deleted element, we do not need it.
+    _ = state.rows.orderedRemove(at);
+    state.dirty += 1;
 }
 
 pub fn main() !void {
