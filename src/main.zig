@@ -558,14 +558,23 @@ fn editorSave() !void {
     const buf = try state.rowsToString();
     const file = try std.fs.cwd().openFile(fname, .{ .mode = .write_only });
     defer file.close();
-    try file.writeAll(buf);
+
+    file.writeAll(buf) catch |err| {
+        var err_buf: [100]u8 = undefined;
+        const failure_msg = try std.fmt.bufPrint(&err_buf, "Failed to save a file: {}", .{err});
+        try editorSetStatusMessage(failure_msg);
+        return;
+    };
+    var fmt_buf: [100]u8 = undefined;
+    const success_msg = try std.fmt.bufPrint(&fmt_buf, "{d} bytes written to disk.", .{buf.len});
+    try editorSetStatusMessage(success_msg);
 }
 
-fn editorSetStatusMessage(msg: []const u8) void {
+fn editorSetStatusMessage(msg: []const u8) !void {
     // There is some formatting magic in the tutorial version of this.
-    // I will start simpler.
-    // TODO: should I copy memory instead here?
-    state.statusmsg = msg;
+    // Would probably be nicer not to format string before every message, but it also
+    // simpler to some extent.
+    state.statusmsg = try state.allocator.dupe(u8, msg);
     state.statusmsg_time = std.time.timestamp();
 }
 
@@ -592,7 +601,7 @@ pub fn main() !void {
         try editorOpen(std.mem.span(std.os.argv[1]));
     }
 
-    editorSetStatusMessage("yobibyte's text editor");
+    try editorSetStatusMessage("Ctrl+S: save, Ctrl+Q: quit.");
 
     defer disableRawMode(handle, &stdout) catch |err| {
         std.debug.print("Failed to restore the original terminal mode: {}", .{err});
