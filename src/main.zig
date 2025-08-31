@@ -332,7 +332,7 @@ fn editorProcessKeypress(reader: *std.fs.File.Reader) !bool {
     switch (c) {
         0 => return true, // 0 is EndOfStream.
         // TODO
-        '\r' => {},
+        '\r' => try editorInsertNewLine(),
         ctrlKey('q') => {
             if (state.dirty > 0 and state.confirm_to_quit) {
                 state.confirm_to_quit = false;
@@ -582,22 +582,27 @@ fn editorOpen(fname: []const u8) !void {
                 else => return err,
             }
         };
-        try editorAppendRow(line);
+        try editorInsertRow(state.rows.items.len, line);
     }
     state.filename = try state.allocator.dupe(u8, fname);
     // AppendRow modifies the dirty counter -> reset.
     state.dirty = 0;
 }
 
-fn editorAppendRow(line: []const u8) !void {
+fn editorInsertRow(at: usize, line: []const u8) !void {
+    if (at > state.rows.items.len) {
+        return;
+    }
     const content = try state.allocator.dupe(u8, line);
-    try state.rows.append(try Row.init(content));
+    try state.rows.insert(at, try Row.init(content));
+
+    try state.rows.items[at].update();
     state.dirty += 1;
 }
 
 fn editorInsertChar(c: u8) !void {
     if (state.cy == state.rows.items.len) {
-        try editorAppendRow("");
+        try editorInsertRow(state.cy, "");
     }
     try state.rows.items[state.cy].insertChar(c, state.cx);
     state.cx += 1;
@@ -664,6 +669,20 @@ fn editorDelRow(at: usize) void {
     // This function returns the deleted element, we do not need it.
     _ = state.rows.orderedRemove(at);
     state.dirty += 1;
+}
+
+fn editorInsertNewLine() !void {
+    if (state.cx == 0) {
+        try editorInsertRow(state.cy, "");
+    } else {
+        var row = state.rows.items[state.cy]; 
+        try editorInsertRow(state.cy+1, row.content[state.cx..]);
+        row.content = row.content[0..state.cx];
+        try row.update();
+    }
+    state.cy+=1;
+    state.cx=0;
+    state.dirty+=1;
 }
 
 pub fn main() !void {
