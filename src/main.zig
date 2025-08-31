@@ -174,10 +174,33 @@ const EditorState = struct {
     rows: std.array_list.Managed(*Row),
     rowoffset: usize,
     coloffset: usize,
-    filename: []const u8,
+    filename: ?[]const u8,
     // Tutorial has a status message row, but I do find it useful.
     // Maybe I will add it in the future.
     // statusmsg: [80] const u8,
+
+    fn rowsToString(self: *EditorState) ![]u8 {
+        var total_len: usize = 0;
+        for (self.rows.items) |row| {
+            // 1 for the newline symbol.
+            total_len += row.content.len + 1;
+        }
+        const buf = try state.allocator.alloc(u8, total_len);
+        var bytes_written: usize = 0;
+        for (self.rows.items) |row| {
+            // stdlib docs say this function is deprecated.
+            // TODO: rewrite to use @memmove.
+            if (row.content.len > 0) {
+                std.mem.copyForwards(u8, buf[bytes_written .. bytes_written + row.content.len], row.content);
+            }
+            bytes_written += row.content.len;
+            buf[bytes_written] = '\n';
+            bytes_written += 1;
+        }
+        // With the arena allocator I do not actually care who frees this.
+        // But I need to figure out what to do when I move to gpa.
+        return buf;
+    }
 };
 var state: EditorState = undefined;
 
@@ -279,6 +302,7 @@ fn editorProcessKeypress(reader: *std.fs.File.Reader) !bool {
                 editorMoveCursor(if (c == KEY_PGUP) KEY_UP else KEY_DOWN);
             }
         },
+        ctrlKey('s') => try editorSave(),
         KEY_HOME => {
             state.cx = 0;
         },
@@ -384,7 +408,7 @@ fn editorDrawStatusBar(str_buffer: *String) !void {
     const emptyspots = state.screencols - lines.len;
 
     // Should we truncate from the left? What does vim do?
-    var fname = state.filename;
+    var fname = state.filename orelse "[No name]";
     if (fname.len > emptyspots) {
         fname = fname[0..emptyspots];
     }
@@ -476,10 +500,11 @@ fn initEditor(writer: *const std.fs.File, allocator: std.mem.Allocator) !void {
     const ws = try getWindowSize(writer);
     state.screenrows = ws[0] - 1;
     state.screencols = ws[1];
-    state.filename = "[No name]";
+    state.filename = null;
 }
 
 fn editorOpen(fname: []const u8) !void {
+    // FIXME, this fails
     const file = try std.fs.cwd().openFile(fname, .{ .mode = .read_only });
     defer file.close();
 
@@ -510,6 +535,16 @@ fn editorInsertChar(c: u8) !void {
     }
     try state.rows.items[state.cy].insertChar(c, state.cx);
     state.cx += 1;
+}
+
+fn editorSave() !void {
+    // TODO: add a command to save to a filename if empty.
+    const fname = state.filename orelse return;
+
+    const buf = try state.rowsToString();
+    const file = try std.fs.cwd().openFile(fname, .{ .mode = .write_only });
+    try file.writeAll(buf);
+    defer file.close();
 }
 
 pub fn main() !void {
