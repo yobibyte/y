@@ -715,7 +715,13 @@ fn editorPrompt(prompt: []const u8) !?[]u8 {
         // TODO: be careful when moved to gpa.
         const c: u16 = try editorReadKey(state.reader);
 
-        if (c == '\x1b') {
+        if (c == KEY_DEL or c == ctrlKey('h') or c == KEY_BACKSPACE) {
+            // TODO: this is a big ugly as all keys delete to the right.
+            // we should be able to move around here and DEL should behave differently from BACKSPACE.
+            if (command_buf_len != promptlen) {
+                command_buf_len -=1;
+            }
+        } else if (c == '\x1b') {
             try editorSetStatusMessage("");
             return null;
         } else if (c == '\r') {
