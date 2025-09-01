@@ -205,6 +205,9 @@ const EditorState = struct {
     // TODO: Right now, if I add a char and remove it immediately, this will not reset the dirty.
     // How do we address those?
     confirm_to_quit: bool, // if set, quit without confirmation, reset when pressed Ctrl+Q once.
+    stdout: *const std.fs.File,
+    reader: *std.fs.File.Reader,
+    gpa_allocator: std.mem.Allocator,
 
     fn rowsToString(self: *EditorState) ![]u8 {
         var total_len: usize = 0;
@@ -229,7 +232,7 @@ const EditorState = struct {
         return buf;
     }
 
-    fn reset(self: *EditorState, writer: *const std.fs.File, allocator: std.mem.Allocator) !void {
+    fn reset(self: *EditorState, writer: *const std.fs.File, reader: *std.fs.File.Reader, allocator: std.mem.Allocator, gpa_allocator: std.mem.Allocator) !void {
         self.allocator = allocator;
         self.cx = 0;
         self.rx = 0;
@@ -245,6 +248,9 @@ const EditorState = struct {
         self.statusmsg_time = 0;
         self.dirty = 0;
         self.confirm_to_quit = true;
+        self.stdout = writer;
+        self.reader = reader;
+        self.gpa_allocator = gpa_allocator;
     }
 };
 var state: EditorState = undefined;
@@ -377,7 +383,6 @@ fn editorProcessKeypress(reader: *std.fs.File.Reader) !bool {
         KEY_HOME => {
             state.cx = 0;
         },
-        // FIXME: if there's a tab, we do not properly jump to line end.
         KEY_END => {
             if (state.cy < state.rows.items.len) {
                 state.cx = state.rows.items[state.cy].content.len;
@@ -416,9 +421,9 @@ fn editorScroll() void {
         state.coloffset = state.rx - state.screencols + 1;
     }
 }
-fn editorRefreshScreen(writer: *const std.fs.File, string_allocator: *const std.mem.Allocator) !void {
+fn editorRefreshScreen() !void {
     editorScroll();
-    var str_buf = String{ .data = "", .allocator = string_allocator };
+    var str_buf = String{ .data = "", .allocator = &state.gpa_allocator };
     defer str_buf.free();
 
     try str_buf.append("\x1b[?25l");
@@ -431,7 +436,7 @@ fn editorRefreshScreen(writer: *const std.fs.File, string_allocator: *const std.
     try str_buf.append(escape_code);
 
     try str_buf.append("\x1b[?25h");
-    try writer.writeAll(str_buf.data);
+    try state.stdout.writeAll(str_buf.data);
 }
 
 fn editorDrawRows(str_buffer: *String) !void {
@@ -576,7 +581,6 @@ fn getWindowSize(writer: *const std.fs.File) ![2]usize {
 }
 
 fn editorOpen(fname: []const u8) !void {
-    // FIXME, this fails
     const file = try std.fs.cwd().openFile(fname, .{ .mode = .read_only });
     defer file.close();
 
@@ -618,22 +622,26 @@ fn editorInsertChar(c: u8) !void {
 }
 
 fn editorSave() !void {
-    // TODO: add a command to save to a filename if empty.
-    const fname = state.filename orelse return;
-    const buf = try state.rowsToString();
-    const file = try std.fs.cwd().openFile(fname, .{ .mode = .write_only });
-    defer file.close();
+    const maybe_fname = state.filename orelse try editorPrompt("Save as: ");
+    if (maybe_fname) |fname| {
+        const buf = try state.rowsToString();
+        const file = try std.fs.cwd().createFile(fname, .{ .truncate = true });
+        defer file.close();
 
-    file.writeAll(buf) catch |err| {
-        var err_buf: [100]u8 = undefined;
-        const failure_msg = try std.fmt.bufPrint(&err_buf, "Failed to save a file: {}", .{err});
-        try editorSetStatusMessage(failure_msg);
+        file.writeAll(buf) catch |err| {
+            var err_buf: [100]u8 = undefined;
+            const failure_msg = try std.fmt.bufPrint(&err_buf, "Failed to save a file: {}", .{err});
+            try editorSetStatusMessage(failure_msg);
+            return;
+        };
+        var fmt_buf: [100]u8 = undefined;
+        const success_msg = try std.fmt.bufPrint(&fmt_buf, "{d} bytes written to disk.", .{buf.len});
+        try editorSetStatusMessage(success_msg);
+        state.dirty = 0;
+    } else {
+        try editorSetStatusMessage("Save aborted.");
         return;
-    };
-    var fmt_buf: [100]u8 = undefined;
-    const success_msg = try std.fmt.bufPrint(&fmt_buf, "{d} bytes written to disk.", .{buf.len});
-    try editorSetStatusMessage(success_msg);
-    state.dirty = 0;
+    }
 }
 
 fn editorSetStatusMessage(msg: []const u8) !void {
@@ -694,6 +702,45 @@ fn editorInsertNewLine() !void {
     state.dirty += 1;
 }
 
+fn editorPrompt(prompt: []const u8) !?[]u8 {
+    var command_buf = try state.allocator.alloc(u8, 80);
+    var command_buf_len: usize = prompt.len;
+    const promptlen = prompt.len;
+    std.mem.copyForwards(u8, command_buf[0..promptlen], prompt);
+
+    while (true) {
+        try editorSetStatusMessage(command_buf[0..command_buf_len]);
+        try editorRefreshScreen();
+
+        // TODO: be careful when moved to gpa.
+        const c: u16 = try editorReadKey(state.reader);
+
+        if (c == '\x1b') {
+            try editorSetStatusMessage("");
+            return null;
+        } else if (c == '\r') {
+            if (command_buf_len != 0) {
+                try editorSetStatusMessage("");
+                return command_buf[promptlen..command_buf_len];
+            }
+            // TODO: do we need the c>0 check? I think we do otherwise EndOfStream will pollute this.
+        } else if (c > 0 and c < 128) {
+            const casted_char = std.math.cast(u8, c) orelse return error.ValueTooBig;
+            if (!std.ascii.isControl(casted_char)) {
+                const curlen = command_buf.len;
+                if (command_buf_len == curlen - 1) {
+                    const new_command_buf = try state.allocator.alloc(u8, 2 * curlen);
+                    std.mem.copyForwards(u8, new_command_buf[0..curlen], command_buf[0..curlen]);
+                    defer state.allocator.free(command_buf);
+                    command_buf = new_command_buf;
+                }
+                command_buf[command_buf_len] = casted_char;
+                command_buf_len += 1;
+            }
+        }
+    }
+}
+
 pub fn main() !void {
     const stdin = std.fs.File.stdin();
     const stdout = std.fs.File.stdout();
@@ -712,7 +759,7 @@ pub fn main() !void {
 
     const handle = stdin.handle;
     try enableRawMode(handle);
-    try state.reset(&stdout, arena.allocator());
+    try state.reset(&stdout, &reader, arena.allocator(), allocator);
     if (std.os.argv.len > 1) {
         try editorOpen(std.mem.span(std.os.argv[1]));
     }
@@ -724,7 +771,7 @@ pub fn main() !void {
     };
 
     while (true) {
-        try editorRefreshScreen(&stdout, &allocator);
+        try editorRefreshScreen();
         if (!try editorProcessKeypress(&reader)) {
             break;
         }
