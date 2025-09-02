@@ -311,6 +311,10 @@ fn editorReadKey(reader: *std.fs.File.Reader) !u16 {
                             },
                         }
                     }
+                    // There is prob a method to read until the end of stream in the stdlib, but we will need to move to a new API soon, we will do it then.
+                    while (true) {
+                        _ = oldreader.readByte() catch return '\x1b';
+                    }
                 },
                 'A' => return KEY_UP,
                 'B' => return KEY_DOWN,
@@ -391,10 +395,11 @@ fn editorProcessKeypress(reader: *std.fs.File.Reader) !bool {
 
         // TODO
         ctrlKey('l'), '\x1b' => {},
-
         else => {
             const casted_char = std.math.cast(u8, c) orelse return error.ValueTooBig;
-            try editorInsertChar(casted_char);
+            if (!std.ascii.isControl(casted_char)) {
+                try editorInsertChar(casted_char);
+            }
         },
     }
     // Reset confirmation flag when any other key than Ctrl+q was typed.
@@ -719,7 +724,7 @@ fn editorPrompt(prompt: []const u8) !?[]u8 {
             // TODO: this is a big ugly as all keys delete to the right.
             // we should be able to move around here and DEL should behave differently from BACKSPACE.
             if (command_buf_len != promptlen) {
-                command_buf_len -=1;
+                command_buf_len -= 1;
             }
         } else if (c == '\x1b') {
             try editorSetStatusMessage("");
