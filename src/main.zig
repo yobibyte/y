@@ -32,9 +32,6 @@
 //            /#%&%#%##////(#%(@%*,,*/*/.(
 //                 /(/#(((/*/#****/*,/*.
 
-// TODO: I probably want to get rid of the arena allocator and do the memory management manually.
-// An alternative, read on what people do to manage memory with the arena allocator.
-
 const std = @import("std");
 const config = @import("config.zig");
 const posix = std.posix;
@@ -53,6 +50,11 @@ const KEY_PGDOWN = 1005;
 const KEY_HOME = 1006;
 const KEY_END = 1007;
 const KEY_DEL = 1008;
+
+const Mode = enum {
+    normal,
+    insert,
+};
 
 const zon: struct {
     name: enum { y },
@@ -80,7 +82,6 @@ const String = struct {
         self.allocator.free(self.data);
     }
 };
-// TODO: move Row to a separate file.
 const Row = struct {
     content: []u8,
     render: []u8,
@@ -99,7 +100,6 @@ const Row = struct {
                 tabs += 1;
             }
         }
-        // TODO: move render allocation to gpa instead of arena.
         // We already have 1 byte in the content, subtract from the width.
         // This is the maximum number of memory we'll use.
         self.render = try state.allocator.alloc(u8, self.content.len + tabs * (config.TAB_WIDTH - 1));
@@ -202,12 +202,11 @@ const EditorState = struct {
     // Can do with a bool now, but probably will be useful for tracking undo.
     // Probably, with the undo file, we can make it signed, but I will change it later.
     dirty: u64,
-    // TODO: Right now, if I add a char and remove it immediately, this will not reset the dirty.
-    // How do we address those?
     confirm_to_quit: bool, // if set, quit without confirmation, reset when pressed Ctrl+Q once.
     stdout: *const std.fs.File,
     reader: *std.fs.File.Reader,
     gpa_allocator: std.mem.Allocator,
+    mode: Mode,
 
     fn rowsToString(self: *EditorState) ![]u8 {
         var total_len: usize = 0;
@@ -251,6 +250,7 @@ const EditorState = struct {
         self.stdout = writer;
         self.reader = reader;
         self.gpa_allocator = gpa_allocator;
+        self.mode = Mode.normal;
     }
 };
 var state: EditorState = undefined;
@@ -337,25 +337,37 @@ fn editorReadKey(reader: *std.fs.File.Reader) !u16 {
     }
 }
 
-fn editorProcessKeypress(reader: *std.fs.File.Reader) !bool {
-    const c = try editorReadKey(reader);
+fn editorQuit() !bool {
+    if (state.dirty > 0 and state.confirm_to_quit) {
+        state.confirm_to_quit = false;
+        try editorSetStatusMessage("You have unsaved changes. Use the quit command again if you still want to quit.");
+        return true;
+    }
+    return false;
+}
+fn editorProcessKeypressNormal(c: u16) !bool {
     switch (c) {
         0 => return true, // 0 is EndOfStream.
-        // TODO
+        'h' => editorMoveCursor(KEY_LEFT),
+        'j' => editorMoveCursor(KEY_DOWN),
+        'k' => editorMoveCursor(KEY_UP),
+        'l' => editorMoveCursor(KEY_RIGHT),
+        'i' => state.mode = Mode.insert,
+        's' => try editorSave(),
+        'q' => return editorQuit(),
+        else => {},
+    }
+    state.confirm_to_quit = true;
+    return true;
+}
+fn editorProcessKeypressInsert(c: u16) !bool {
+    switch (c) {
+        0 => return true, // 0 is EndOfStream.
         '\r' => try editorInsertNewLine(),
-        ctrlKey('q') => {
-            if (state.dirty > 0 and state.confirm_to_quit) {
-                state.confirm_to_quit = false;
-                try editorSetStatusMessage("You have unsaved changes. Press Ctrl+Q again if you still want to quit.");
-                return true;
-            }
-            return false;
-        },
+        ctrlKey('q') => return editorQuit(),
         KEY_UP, KEY_DOWN, KEY_RIGHT, KEY_LEFT => editorMoveCursor(c),
-        // TODO
         KEY_BACKSPACE, KEY_DEL, ctrlKey('h') => {
             if (c == KEY_DEL) {
-                // TODO: this behaves incorrectly for the rightmost character now.
                 // We should be joining the two rows in here in the insert mode.
                 if (state.cy < state.rows.items.len) {
                     if (state.cx == state.rows.items[state.cy].content.len) {
@@ -393,8 +405,9 @@ fn editorProcessKeypress(reader: *std.fs.File.Reader) !bool {
             }
         },
 
-        // TODO
-        ctrlKey('l'), '\x1b' => {},
+        ctrlKey('l'), '\x1b' => {
+            state.mode = Mode.normal;
+        },
         else => {
             const casted_char = std.math.cast(u8, c) orelse return error.ValueTooBig;
             if (!std.ascii.isControl(casted_char)) {
@@ -494,7 +507,7 @@ fn editorDrawStatusBar(str_buffer: *String) !void {
 
     // Reserve space for lines.
     var lbuffer: [100]u8 = undefined;
-    const lines = try std.fmt.bufPrint(&lbuffer, " {d}/{d}", .{ state.cy + 1, state.rows.items.len });
+    const lines = try std.fmt.bufPrint(&lbuffer, " {s} {d}/{d}", .{ @tagName(state.mode), state.cy + 1, state.rows.items.len });
 
     const mod_string = if (state.dirty > 0) " (modified)" else "";
     const emptyspots = state.screencols - lines.len - mod_string.len;
@@ -506,8 +519,6 @@ fn editorDrawStatusBar(str_buffer: *String) !void {
     }
     try str_buffer.append(fname);
     try str_buffer.append(mod_string);
-    // TODO: Do the above properly with formatting.
-    // Learn how to set the max field width dynamically in zig.
 
     const nspaces = emptyspots - fname.len;
     if (nspaces > 0) {
@@ -721,7 +732,6 @@ fn editorPrompt(prompt: []const u8) !?[]u8 {
         const c: u16 = try editorReadKey(state.reader);
 
         if (c == KEY_DEL or c == ctrlKey('h') or c == KEY_BACKSPACE) {
-            // TODO: this is a big ugly as all keys delete to the right.
             // we should be able to move around here and DEL should behave differently from BACKSPACE.
             if (command_buf_len != promptlen) {
                 command_buf_len -= 1;
@@ -734,7 +744,6 @@ fn editorPrompt(prompt: []const u8) !?[]u8 {
                 try editorSetStatusMessage("");
                 return command_buf[promptlen..command_buf_len];
             }
-            // TODO: do we need the c>0 check? I think we do otherwise EndOfStream will pollute this.
         } else if (c > 0 and c < 128) {
             const casted_char = std.math.cast(u8, c) orelse return error.ValueTooBig;
             if (!std.ascii.isControl(casted_char)) {
@@ -783,7 +792,12 @@ pub fn main() !void {
 
     while (true) {
         try editorRefreshScreen();
-        if (!try editorProcessKeypress(&reader)) {
+        const c = try editorReadKey(&reader);
+        const should_continue = switch (state.mode) {
+            Mode.normal => try editorProcessKeypressNormal(c),
+            Mode.insert => try editorProcessKeypressInsert(c),
+        };
+        if (!should_continue) {
             break;
         }
     }
