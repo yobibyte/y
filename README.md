@@ -32,19 +32,19 @@ I am here to have fun and learn.
 - [x] Text viewer chapter from the tutorial.
 - [x] Text editor chapter from the tutorial.
 - [x] Basic mode and motions support (normal/insert, hjkl).
+- [x] Go to a line number with :<line number>.
 - [ ] Search chapter from the tutorial.
 - [ ] More advanced vim motions.
 - [ ] Line wrapping.
-- [ ] Go to a line number with :<line number>.
 - [ ] Search and Replace.
 - [ ] Tab expansion, controlling tabwidth.
 - [ ] Commenting out code with language-dependent comment chars.
 - [ ] Multiple buffers.
-- [ ] Vertical/horizontal splits.
+- [ ] Undo.
+- [ ] Visual/replace mode.
+- [ ] Using system's clipboard (vim.o.clipboard = "unnamedplus").
 - [ ] An ability to run a bash command from the editor.
 - [ ] An ability to pipe the output from above to an open buffer (or create a buffer with it).
-- [ ] Visual/replace mode.
-- [ ] Quickfix list.
-- [ ] Undo.
-- [ ] Using system's clipboard (vim.o.clipboard = "unnamedplus").
 - [ ] Utf8 support.
+- [ ] Quickfix list.
+- [ ] Vertical/horizontal splits.

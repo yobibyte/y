@@ -40,6 +40,7 @@ const posix = std.posix;
 // But I do not want to create an element for every char.
 // Maybe there is a better way, but for now I'll keep it as is.
 // Give the keys values above char levels to use actual chars to edit text.
+const KEY_PROMPT = 32; // space
 const KEY_BACKSPACE = 127;
 const KEY_UP = 1000;
 const KEY_DOWN = 1001;
@@ -355,8 +356,29 @@ fn editorProcessKeypressNormal(c: u16) !bool {
         'i' => state.mode = Mode.insert,
         's' => try editorSave(),
         'q' => return editorQuit(),
-        else => {},
+        'x', KEY_DEL => {
+            if (state.cy < state.rows.items.len) {
+                if (state.cx < state.rows.items[state.cy].content.len) {
+                    editorMoveCursor(KEY_RIGHT);
+                }
+                try editorDelCharToLeft();
+            }
+        },
+        'G' => state.cy = state.rows.items.len - 1,
+        // Example of using a command prompt.
+        KEY_PROMPT => {
+            const cmd = try editorPrompt(":") orelse "";
+                const number = std.fmt.parseInt(usize, cmd, 10) catch 0;
+                if (number > 0 and number <= state.rows.items.len) {
+                    state.cy = number - 1;
+                }
+            }
+        },
+        else => {
+            state.mode = Mode.normal;
+        },
     }
+
     state.confirm_to_quit = true;
     return true;
 }
@@ -783,8 +805,6 @@ pub fn main() !void {
     if (std.os.argv.len > 1) {
         try editorOpen(std.mem.span(std.os.argv[1]));
     }
-
-    try editorSetStatusMessage("Ctrl+S: save, Ctrl+Q: quit.");
 
     defer disableRawMode(handle, &stdout) catch |err| {
         std.debug.print("Failed to restore the original terminal mode: {}", .{err});
