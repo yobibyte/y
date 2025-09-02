@@ -208,6 +208,7 @@ const EditorState = struct {
     reader: *std.fs.File.Reader,
     gpa_allocator: std.mem.Allocator,
     mode: Mode,
+    comment_chars: []const u8,
 
     fn rowsToString(self: *EditorState) ![]u8 {
         var total_len: usize = 0;
@@ -252,6 +253,7 @@ const EditorState = struct {
         self.reader = reader;
         self.gpa_allocator = gpa_allocator;
         self.mode = Mode.normal;
+        self.comment_chars = "//";
     }
 };
 var state: EditorState = undefined;
@@ -346,6 +348,27 @@ fn editorQuit() !bool {
     }
     return false;
 }
+
+fn editorCommentLine() !void {
+    var to_comment = true;
+    if (state.rows.items[state.cy].content.len >= state.comment_chars.len) {
+        to_comment = !std.mem.startsWith(u8, state.rows.items[state.cy].content, state.comment_chars);
+    }
+    for (state.comment_chars, 0..) |cs, i| {
+        if (to_comment) {
+            try state.rows.items[state.cy].insertChar(cs, i);
+            state.cx += 1;
+        } else {
+            state.rows.items[state.cy].delChar(0);
+            if (state.cx > 0) {
+                state.cx -= 1;
+            }
+        }
+    }
+    try state.rows.items[state.cy].update();
+    state.dirty += 1;
+}
+
 fn editorProcessKeypressNormal(c: u16) !bool {
     switch (c) {
         0 => return true, // 0 is EndOfStream.
@@ -368,6 +391,9 @@ fn editorProcessKeypressNormal(c: u16) !bool {
         // Example of using a command prompt.
         KEY_PROMPT => {
             const cmd = try editorPrompt(":") orelse "";
+            if (std.mem.eql(u8, cmd, "c")) {
+                try editorCommentLine();
+            } else {
                 const number = std.fmt.parseInt(usize, cmd, 10) catch 0;
                 if (number > 0 and number <= state.rows.items.len) {
                     state.cy = number - 1;
@@ -636,8 +662,17 @@ fn editorOpen(fname: []const u8) !void {
         try editorInsertRow(state.rows.items.len, line);
     }
     state.filename = try state.allocator.dupe(u8, fname);
+    editorSetCommentChars();
+
     // AppendRow modifies the dirty counter -> reset.
     state.dirty = 0;
+}
+
+fn editorSetCommentChars() void {
+    const fname = state.filename orelse return;
+    if (std.mem.endsWith(u8, fname, ".py")) {
+        state.comment_chars = "#";
+    }
 }
 
 fn editorInsertRow(at: usize, line: []const u8) !void {
@@ -662,6 +697,9 @@ fn editorInsertChar(c: u8) !void {
 fn editorSave() !void {
     const maybe_fname = state.filename orelse try editorPrompt("Save as: ");
     if (maybe_fname) |fname| {
+        // TODO copy here when moving to gpa.
+        state.filename = fname;
+        editorSetCommentChars();
         const buf = try state.rowsToString();
         const file = try std.fs.cwd().createFile(fname, .{ .truncate = true });
         defer file.close();

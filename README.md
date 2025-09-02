@@ -33,12 +33,12 @@ I am here to have fun and learn.
 - [x] Text editor chapter from the tutorial.
 - [x] Basic mode and motions support (normal/insert, hjkl).
 - [x] Go to a line number with :<line number>.
+- [x] Commenting out code with language-dependent comment chars.
 - [ ] Search chapter from the tutorial.
 - [ ] More advanced vim motions.
 - [ ] Line wrapping.
 - [ ] Search and Replace.
 - [ ] Tab expansion, controlling tabwidth.
-- [ ] Commenting out code with language-dependent comment chars.
 - [ ] Multiple buffers.
 - [ ] Undo.
 - [ ] Visual/replace mode.
