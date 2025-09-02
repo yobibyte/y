@@ -1,0 +1,24 @@
+---------
+There is something wrong with the boundary check on the bottom most row. Sometimes, I cannot move to the new row, sometimes, I get move one row past it.
+---------
+Get rid of arena allocator and use gpa
+---------
+Incapsulate editor behaviour, move state to the new Editor struct.
+---------
+move render allocation to gpa instead of arena.
+---------
+Right now, if I add a char and remove it immediately, this will not reset the dirty.
+// How do we address those?
+---------
+Handling text at editor prompt is a big ugly as all keys delete to the right.
+We need to reuse the input handling logic with the rest of the editor. Make prompt just another row???
+---------
+move Row to a separate file.
+---------
+We currently use all unprocessed control characters enter the normal mode. Use only escape for that, ignore others.
+---------
+Rewrite MessageBar properly using the string formatting.
+Learn how to set the max field width dynamically in zig.
+---------
+Fully switch to the new reader/writer API, do not use the oldreader 
+---------
