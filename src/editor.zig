@@ -5,7 +5,6 @@ const row = @import("row.zig");
 const config = @import("config.zig");
 const posix = std.posix;
 
-
 // In the original tutorial, this is a enum.
 // But I do not want to create an element for every char.
 // Maybe there is a better way, but for now I'll keep it as is.
@@ -26,8 +25,6 @@ inline fn ctrlKey(k: u8) u8 {
     return k & 0x1f;
 }
 
-
-
 pub const Mode = enum {
     normal,
     insert,
@@ -42,7 +39,6 @@ const zon: struct {
 } = @import("zon_mod");
 
 const welcome_msg = "yobibyte's text editor, version " ++ zon.version ++ ".";
-
 
 pub const Editor = struct {
     allocator: std.mem.Allocator,
@@ -635,4 +631,3 @@ fn editorInsertNewLine() !void {
     main.state.cx = 0;
     main.state.dirty += 1;
 }
-

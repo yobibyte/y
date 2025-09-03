@@ -70,7 +70,6 @@ fn getCursorPosition(writer: *const std.fs.File) ![2]usize {
     return .{ rows, cols };
 }
 
-
 pub const Buffer = struct {
     allocator: std.mem.Allocator,
     screenrows: usize,
@@ -146,7 +145,6 @@ pub const Buffer = struct {
     }
 };
 pub var state: Buffer = undefined;
-
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
