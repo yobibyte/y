@@ -34,6 +34,7 @@
 
 const std = @import("std");
 const config = @import("config.zig");
+const row = @import("row.zig");
 const posix = std.posix;
 
 // In the original tutorial, this is a enum.
@@ -83,109 +84,6 @@ const String = struct {
         self.allocator.free(self.data);
     }
 };
-const Row = struct {
-    content: []u8,
-    render: []u8,
-
-    fn init(content: []u8) !*Row {
-        var self = try state.allocator.create(Row);
-        self.content = content;
-        try self.update();
-        return self;
-    }
-
-    fn update(self: *Row) !void {
-        var tabs: usize = 0;
-        for (self.content) |c| {
-            if (c == '\t') {
-                tabs += 1;
-            }
-        }
-        // We already have 1 byte in the content, subtract from the width.
-        // This is the maximum number of memory we'll use.
-        self.render = try state.allocator.alloc(u8, self.content.len + tabs * (config.TAB_WIDTH - 1));
-        var render_idx: usize = 0;
-        for (self.content) |c| {
-            if (c == '\t') {
-                self.render[render_idx] = ' ';
-                render_idx += 1;
-                while (render_idx % config.TAB_WIDTH != 0) {
-                    self.render[render_idx] = ' ';
-                    render_idx += 1;
-                }
-            } else {
-                self.render[render_idx] = c;
-                render_idx += 1;
-            }
-        }
-        self.render = self.render[0..render_idx];
-    }
-
-    // I am not sure if I want to support tabs at all.
-    // I can prob just get rid of this functionality and always render tabs as spaces.
-    fn cxToRx(self: *Row, cx: usize) usize {
-        var rx: usize = 0;
-
-        for (self.content[0..cx]) |c| {
-            if (c == '\t') {
-                rx += (config.TAB_WIDTH - 1) - (rx % config.TAB_WIDTH);
-            }
-            rx += 1;
-        }
-
-        return rx;
-    }
-
-    fn insertChar(self: *Row, c: u8, at: usize) !void {
-        // I am not sure why the original tutorial used an int here.
-        // I will use a unsigned int here.
-        const oldsize = self.content.len;
-        var actual_at = at;
-        if (at > oldsize) {
-            actual_at = oldsize;
-        }
-        // I didn'make reallocate work. Figure this out.
-        // Probably after switch to the gpa.
-        // self.content = state.allocator.reallocate(self.content, oldsize+1);
-
-        const new_content = try state.allocator.alloc(u8, oldsize + 1);
-
-        if (actual_at > 0) {
-            std.mem.copyForwards(u8, new_content[0..actual_at], self.content[0..actual_at]);
-        }
-        new_content[actual_at] = c;
-        if (actual_at < oldsize) {
-            std.mem.copyForwards(u8, new_content[actual_at + 1 ..], self.content[actual_at..]);
-        }
-        state.allocator.free(self.content);
-        self.content = new_content;
-
-        try self.update();
-        state.dirty += 1;
-    }
-
-    pub fn delChar(self: *Row, at: usize) void {
-        const rowlen = self.content.len;
-        if (at >= rowlen) {
-            return;
-        }
-        std.mem.copyForwards(u8, self.content[at..], self.content[at + 1 .. rowlen]);
-        self.content = self.content[0 .. rowlen - 1];
-    }
-
-    pub fn append(self: *Row, chunk: []u8) !void {
-        const new_content = try state.allocator.alloc(u8, self.content.len + chunk.len);
-        std.mem.copyForwards(u8, new_content[0..self.content.len], self.content);
-        std.mem.copyForwards(u8, new_content[self.content.len..], chunk);
-        // TODO: be careful when using gpa.
-        state.allocator.free(self.content);
-        self.content = new_content;
-
-        try self.update();
-        state.dirty += 1;
-    }
-};
-
 const EditorState = struct {
     allocator: std.mem.Allocator,
     orig_term: posix.system.termios,
@@ -194,7 +92,7 @@ const EditorState = struct {
     cx: usize,
     cy: usize, // y coordinate in the file frame of reference.
     rx: usize, // render x coordinate.
-    rows: std.array_list.Managed(*Row),
+    rows: std.array_list.Managed(*row.Row),
     rowoffset: usize,
     coloffset: usize,
     filename: ?[]const u8,
@@ -212,19 +110,19 @@ const EditorState = struct {
 
     fn rowsToString(self: *EditorState) ![]u8 {
         var total_len: usize = 0;
-        for (self.rows.items) |row| {
+        for (self.rows.items) |crow| {
             // 1 for the newline symbol.
-            total_len += row.content.len + 1;
+            total_len += crow.content.len + 1;
         }
         const buf = try state.allocator.alloc(u8, total_len);
         var bytes_written: usize = 0;
-        for (self.rows.items) |row| {
+        for (self.rows.items) |crow| {
             // stdlib docs say this function is deprecated.
             // TODO: rewrite to use @memmove.
-            if (row.content.len > 0) {
-                std.mem.copyForwards(u8, buf[bytes_written .. bytes_written + row.content.len], row.content);
+            if (crow.content.len > 0) {
+                std.mem.copyForwards(u8, buf[bytes_written .. bytes_written + crow.content.len], crow.content);
             }
-            bytes_written += row.content.len;
+            bytes_written += crow.content.len;
             buf[bytes_written] = '\n';
             bytes_written += 1;
         }
@@ -238,7 +136,7 @@ const EditorState = struct {
         self.cx = 0;
         self.rx = 0;
         self.cy = 0;
-        self.rows = std.array_list.Managed(*Row).init(allocator);
+        self.rows = std.array_list.Managed(*row.Row).init(allocator);
         self.rowoffset = 0;
         self.coloffset = 0;
         const ws = try getWindowSize(writer);
@@ -256,7 +154,7 @@ const EditorState = struct {
         self.comment_chars = "//";
     }
 };
-var state: EditorState = undefined;
+pub var state: EditorState = undefined;
 
 inline fn ctrlKey(k: u8) u8 {
     return k & 0x1f;
@@ -506,11 +404,11 @@ fn editorRefreshScreen() !void {
 }
 
 fn editorDrawRows(str_buffer: *String) !void {
-    for (0..state.screenrows) |row| {
-        const filerow = state.rowoffset + row;
+    for (0..state.screenrows) |crow| {
+        const filerow = state.rowoffset + crow;
         // Erase in line, by default, erases everything to the right of cursor.
         if (filerow >= state.rows.items.len) {
-            if (state.rows.items.len == 0 and row == state.screenrows / 3) {
+            if (state.rows.items.len == 0 and crow == state.screenrows / 3) {
                 if (state.screencols - welcome_msg.len >= 0) {
                     const padding = (state.screencols - welcome_msg.len) / 2;
                     if (padding > 0) {
@@ -525,13 +423,13 @@ fn editorDrawRows(str_buffer: *String) !void {
                 try str_buffer.append("~");
             }
         } else {
-            const crow = state.rows.items[filerow].render;
-            if (crow.len >= state.coloffset) {
-                var maxlen = crow.len - state.coloffset;
+            const offset_row = state.rows.items[filerow].render;
+            if (offset_row.len >= state.coloffset) {
+                var maxlen = offset_row.len - state.coloffset;
                 if (maxlen > state.screencols) {
                     maxlen = state.screencols;
                 }
-                try str_buffer.append(crow[state.coloffset .. state.coloffset + maxlen]);
+                try str_buffer.append(offset_row[state.coloffset .. state.coloffset + maxlen]);
             }
         }
         try str_buffer.append("\x1b[K");
@@ -680,7 +578,7 @@ fn editorInsertRow(at: usize, line: []const u8) !void {
         return;
     }
     const content = try state.allocator.dupe(u8, line);
-    try state.rows.insert(at, try Row.init(content));
+    try state.rows.insert(at, try row.Row.init(content));
 
     try state.rows.items[at].update();
     state.dirty += 1;
@@ -736,9 +634,9 @@ fn editorDelCharToLeft() !void {
         return;
     }
     // How can it be smaller than zero?
-    var row = state.rows.items[state.cy];
+    var crow = state.rows.items[state.cy];
     if (state.cx > 0) {
-        state.rows.items[state.cy].delChar(state.cx - 1);
+        crow.delChar(state.cx - 1);
         state.cx -= 1;
     } else {
         // Move cursor to the joint of two new rows.
@@ -749,7 +647,7 @@ fn editorDelCharToLeft() !void {
         editorDelRow(state.cy); // Remove the current row
         state.cy -= 1; // Move cursor up.
     }
-    try row.update();
+    try crow.update();
     state.dirty += 1;
 }
 
@@ -768,10 +666,10 @@ fn editorInsertNewLine() !void {
     if (state.cx == 0) {
         try editorInsertRow(state.cy, "");
     } else {
-        var row = state.rows.items[state.cy];
-        try editorInsertRow(state.cy + 1, row.content[state.cx..]);
-        row.content = row.content[0..state.cx];
-        try row.update();
+        var crow = state.rows.items[state.cy];
+        try editorInsertRow(state.cy + 1, crow.content[state.cx..]);
+        crow.content = crow.content[0..state.cx];
+        try crow.update();
     }
     state.cy += 1;
     state.cx = 0;
