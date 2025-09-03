@@ -69,19 +69,45 @@ const zon: struct {
 const welcome_msg = "yobibyte's text editor, version " ++ zon.version ++ ".";
 
 const String = struct {
-    data: []const u8,
-    allocator: *const std.mem.Allocator,
+    data: []u8,
+    allocator: std.mem.Allocator,
+    len: usize,
 
-    fn append(self: *String, other: []const u8) !void {
-        const new_data = try self.allocator.alloc(u8, self.data.len + other.len);
-        std.mem.copyForwards(u8, new_data[0..self.data.len], self.data);
-        std.mem.copyForwards(u8, new_data[self.data.len..], other);
-        self.allocator.free(self.data);
-        self.data = new_data;
+    fn init(size: usize, allocator: std.mem.Allocator) !*String {
+        var self = try allocator.create(String);
+        errdefer allocator.destroy(self);
+
+        self.allocator = allocator;
+        self.data = try self.allocator.alloc(u8, size);
+        self.len = 0; // We allocate memory, but do not fill it yet.
+        return self;
     }
 
-    fn free(self: *String) void {
+    fn append(self: *String, other: []const u8) !void {
+        const target_size = self.len + other.len;
+        if (self.data.len < target_size) {
+            // If not enough memory in the buffer, increase the size of it.
+            const newsize = @max(target_size, self.data.len * 2);
+            const new_data = try self.allocator.alloc(u8, newsize);
+            if (self.len > 0) {
+                @memcpy(new_data[0..self.len], self.data[0..self.len]);
+            }
+            @memcpy(new_data[self.len..][0..other.len], other);
+            self.allocator.free(self.data);
+            self.data = new_data;
+        } else {
+            @memcpy(self.data[self.len..target_size], other);
+        }
+        self.len = target_size;
+    }
+
+    fn content(self: *String) []u8 {
+        return self.data[0..self.len];
+    }
+
+    fn deinit(self: *String) void {
         self.allocator.free(self.data);
+        self.allocator.destroy(self);
     }
 };
 const EditorState = struct {
@@ -104,7 +130,6 @@ const EditorState = struct {
     confirm_to_quit: bool, // if set, quit without confirmation, reset when pressed Ctrl+Q once.
     stdout: *const std.fs.File,
     reader: *std.fs.File.Reader,
-    gpa_allocator: std.mem.Allocator,
     mode: Mode,
     comment_chars: []const u8,
 
@@ -126,12 +151,10 @@ const EditorState = struct {
             buf[bytes_written] = '\n';
             bytes_written += 1;
         }
-        // With the arena allocator I do not actually care who frees this.
-        // But I need to figure out what to do when I move to gpa.
         return buf;
     }
 
-    fn reset(self: *EditorState, writer: *const std.fs.File, reader: *std.fs.File.Reader, allocator: std.mem.Allocator, gpa_allocator: std.mem.Allocator) !void {
+    fn reset(self: *EditorState, writer: *const std.fs.File, reader: *std.fs.File.Reader, allocator: std.mem.Allocator) !void {
         self.allocator = allocator;
         self.cx = 0;
         self.rx = 0;
@@ -149,9 +172,19 @@ const EditorState = struct {
         self.confirm_to_quit = true;
         self.stdout = writer;
         self.reader = reader;
-        self.gpa_allocator = gpa_allocator;
         self.mode = Mode.normal;
         self.comment_chars = "//";
+    }
+
+    fn deinit(self: *EditorState) void {
+        for (self.rows.items) |crow| {
+            crow.deinit();
+        }
+        self.rows.deinit();
+        if (self.filename) |fname| {
+            self.allocator.free(fname);
+        }
+        state.allocator.free(state.statusmsg);
     }
 };
 pub var state: EditorState = undefined;
@@ -184,8 +217,8 @@ pub fn disableRawMode(handle: posix.fd_t, writer: *const std.fs.File) !void {
     try posix.tcsetattr(handle, .NOW, state.orig_term);
 }
 
-fn editorReadKey(reader: *std.fs.File.Reader) !u16 {
-    var oldreader = reader.interface.adaptToOldInterface();
+fn editorReadKey() !u16 {
+    var oldreader = state.reader.interface.adaptToOldInterface();
     const c = oldreader.readByte() catch |err| switch (err) {
         error.EndOfStream => return 0,
         else => return err,
@@ -288,13 +321,16 @@ fn editorProcessKeypressNormal(c: u16) !bool {
         'G' => state.cy = state.rows.items.len - 1,
         // Example of using a command prompt.
         KEY_PROMPT => {
-            const cmd = try editorPrompt(":") orelse "";
-            if (std.mem.eql(u8, cmd, "c")) {
-                try editorCommentLine();
-            } else {
-                const number = std.fmt.parseInt(usize, cmd, 10) catch 0;
-                if (number > 0 and number <= state.rows.items.len) {
-                    state.cy = number - 1;
+            const maybe_cmd = try editorPrompt(":");
+            if (maybe_cmd) |cmd| {
+                defer state.allocator.free(cmd);
+                if (std.mem.eql(u8, cmd, "c")) {
+                    try editorCommentLine();
+                } else {
+                    const number = std.fmt.parseInt(usize, cmd, 10) catch 0;
+                    if (number > 0 and number <= state.rows.items.len) {
+                        state.cy = number - 1;
+                    }
                 }
             }
         },
@@ -387,20 +423,21 @@ fn editorScroll() void {
 }
 fn editorRefreshScreen() !void {
     editorScroll();
-    var str_buf = String{ .data = "", .allocator = &state.gpa_allocator };
-    defer str_buf.free();
+    // TODO: Make this bigger?
+    var str_buf = try String.init(80, state.allocator);
+    defer str_buf.deinit();
 
     try str_buf.append("\x1b[?25l");
     try str_buf.append("\x1b[H");
-    try editorDrawRows(&str_buf);
-    try editorDrawStatusBar(&str_buf);
-    try editorDrawMessageBar(&str_buf);
+    try editorDrawRows(str_buf);
+    try editorDrawStatusBar(str_buf);
+    try editorDrawMessageBar(str_buf);
     var buf: [20]u8 = undefined;
     const escape_code = try std.fmt.bufPrint(&buf, "\x1b[{d};{d}H", .{ state.cy - state.rowoffset + 1, state.rx - state.coloffset + 1 });
     try str_buf.append(escape_code);
 
     try str_buf.append("\x1b[?25h");
-    try state.stdout.writeAll(str_buf.data);
+    try state.stdout.writeAll(str_buf.content());
 }
 
 fn editorDrawRows(str_buffer: *String) !void {
@@ -471,6 +508,7 @@ fn editorDrawStatusBar(str_buffer: *String) !void {
         const spaces_mem = try state.allocator.alloc(u8, nspaces);
         @memset(spaces_mem, ' ');
         try str_buffer.append(spaces_mem);
+        state.allocator.free(spaces_mem);
     }
 
     try str_buffer.append(lines);
@@ -573,12 +611,11 @@ fn editorSetCommentChars() void {
     }
 }
 
-fn editorInsertRow(at: usize, line: []const u8) !void {
+fn editorInsertRow(at: usize, line: []u8) !void {
     if (at > state.rows.items.len) {
         return;
     }
-    const content = try state.allocator.dupe(u8, line);
-    try state.rows.insert(at, try row.Row.init(content));
+    try state.rows.insert(at, try row.Row.init(line, state.allocator));
 
     try state.rows.items[at].update();
     state.dirty += 1;
@@ -593,12 +630,17 @@ fn editorInsertChar(c: u8) !void {
 }
 
 fn editorSave() !void {
-    const maybe_fname = state.filename orelse try editorPrompt("Save as: ");
-    if (maybe_fname) |fname| {
-        // TODO copy here when moving to gpa.
-        state.filename = fname;
+    if (state.filename == null) {
+        const prompt = try editorPrompt("Save as: ");
+        if (prompt) |fname| {
+            defer state.allocator.free(fname);
+            state.filename = try state.allocator.dupe(u8, fname);
+        }
+    }
+    if (state.filename) |fname| {
         editorSetCommentChars();
         const buf = try state.rowsToString();
+        defer state.allocator.free(buf);
         const file = try std.fs.cwd().createFile(fname, .{ .truncate = true });
         defer file.close();
 
@@ -622,6 +664,7 @@ fn editorSetStatusMessage(msg: []const u8) !void {
     // There is some formatting magic in the tutorial version of this.
     // Would probably be nicer not to format string before every message, but it also
     // simpler to some extent.
+    state.allocator.free(state.statusmsg);
     state.statusmsg = try state.allocator.dupe(u8, msg);
     state.statusmsg_time = std.time.timestamp();
 }
@@ -655,10 +698,8 @@ fn editorDelRow(at: usize) void {
     if (at >= state.rows.items.len) {
         return;
     }
-    // TODO: be careful! When we move to gpa, this will leak memory.
-    // Free the row here.
-    // This function returns the deleted element, we do not need it.
-    _ = state.rows.orderedRemove(at);
+    const crow = state.rows.orderedRemove(at);
+    crow.deinit();
     state.dirty += 1;
 }
 
@@ -686,8 +727,7 @@ fn editorPrompt(prompt: []const u8) !?[]u8 {
         try editorSetStatusMessage(command_buf[0..command_buf_len]);
         try editorRefreshScreen();
 
-        // TODO: be careful when moved to gpa.
-        const c: u16 = try editorReadKey(state.reader);
+        const c: u16 = try editorReadKey();
 
         if (c == KEY_DEL or c == ctrlKey('h') or c == KEY_BACKSPACE) {
             // we should be able to move around here and DEL should behave differently from BACKSPACE.
@@ -700,7 +740,10 @@ fn editorPrompt(prompt: []const u8) !?[]u8 {
         } else if (c == '\r') {
             if (command_buf_len != 0) {
                 try editorSetStatusMessage("");
-                return command_buf[promptlen..command_buf_len];
+                const new_buffer = try state.allocator.alloc(u8, command_buf_len - promptlen);
+                @memcpy(new_buffer, command_buf[promptlen..command_buf_len]);
+                state.allocator.free(command_buf);
+                return new_buffer;
             }
         } else if (c > 0 and c < 128) {
             const casted_char = std.math.cast(u8, c) orelse return error.ValueTooBig;
@@ -719,36 +762,49 @@ fn editorPrompt(prompt: []const u8) !?[]u8 {
     }
 }
 
+const Editor = struct {
+    allocator: std.mem.Allocator,
+
+    fn init(allocator: std.mem.Allocator) !*Editor {
+        var self = try allocator.create(Editor);
+        self.allocator = allocator;
+        return self;
+    }
+
+    fn deinit(self: *Editor) void {
+        self.allocator.destroy(self);
+        state.deinit();
+    }
+};
+
 pub fn main() !void {
-    const stdin = std.fs.File.stdin();
-    const stdout = std.fs.File.stdout();
-    var stdin_buffer: [1024]u8 = undefined;
-    var reader = stdin.reader(&stdin_buffer);
-
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    const allocator = gpa.allocator();
     defer switch (gpa.deinit()) {
         .leak => std.debug.panic("Some memory leaked!", .{}),
         .ok => {},
     };
+    const editor = try Editor.init(gpa.allocator());
+    defer editor.deinit();
 
+    const stdin = std.fs.File.stdin();
+    const stdout = std.fs.File.stdout();
+    var stdin_buffer: [1024]u8 = undefined;
+    var reader = stdin.reader(&stdin_buffer);
     const handle = stdin.handle;
-    try enableRawMode(handle);
-    try state.reset(&stdout, &reader, arena.allocator(), allocator);
-    if (std.os.argv.len > 1) {
-        try editorOpen(std.mem.span(std.os.argv[1]));
-    }
 
+    try enableRawMode(handle);
     defer disableRawMode(handle, &stdout) catch |err| {
         std.debug.print("Failed to restore the original terminal mode: {}", .{err});
     };
 
+    try state.reset(&stdout, &reader, gpa.allocator());
+    if (std.os.argv.len > 1) {
+        try editorOpen(std.mem.span(std.os.argv[1]));
+    }
+
     while (true) {
         try editorRefreshScreen();
-        const c = try editorReadKey(&reader);
+        const c = try editorReadKey();
         const should_continue = switch (state.mode) {
             Mode.normal => try editorProcessKeypressNormal(c),
             Mode.insert => try editorProcessKeypressInsert(c),

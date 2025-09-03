@@ -5,8 +5,6 @@ Get rid of arena allocator and use gpa
 ---------
 Incapsulate editor behaviour, move state to the new Editor struct.
 ---------
-move render allocation to gpa instead of arena.
----------
 Right now, if I add a char and remove it immediately, this will not reset the dirty.
 // How do we address those?
 ---------

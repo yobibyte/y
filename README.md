@@ -1,4 +1,4 @@
-# y: yobibyte's text editor
+asdfasdfasdfasdasdfasdf//# y: yobibyte's text editor
 
 `y` is a highly opionated text editor written by yobibyte.
 It started as following the[kilo](https://viewsourcecode.org/snaptoken/kilo/index.html) tutorial in Zig, but grew out in something bigger.
@@ -9,7 +9,7 @@ The goal is to reimplement a subset of vim I use to do my work and switch from v
 **Radical simplicity**
 I will not be overengineering this. 
 I will implement everything the dumbest way possible until I hit a performance or maintenance issue.
-Every line of code is an enemy.
+     Every line of code is an enemy.
 I will not be implementing features I do not need.
 For instance, I do not need syntax highlighting, and I will not be implemented that.
 I do not need to support every possible use-case or enable the community to modify the editor with a scripting language.
