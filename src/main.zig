@@ -112,7 +112,6 @@ const String = struct {
 };
 const Buffer = struct {
     allocator: std.mem.Allocator,
-    orig_term: posix.system.termios,
     screenrows: usize,
     screencols: usize,
     cx: usize,
@@ -189,30 +188,6 @@ pub var state: Buffer = undefined;
 
 inline fn ctrlKey(k: u8) u8 {
     return k & 0x1f;
-}
-
-pub fn enableRawMode(handle: posix.fd_t) !void {
-    state.orig_term = try posix.tcgetattr(handle);
-    var term = state.orig_term;
-    term.lflag.ECHO = !term.lflag.ECHO;
-    term.lflag.ISIG = !term.lflag.ISIG;
-    term.lflag.ICANON = !term.lflag.ICANON;
-    term.lflag.IEXTEN = !term.lflag.IEXTEN;
-    term.iflag.IXON = !term.iflag.IXON;
-    term.iflag.ICRNL = !term.iflag.ICRNL;
-    term.iflag.BRKINT = !term.iflag.BRKINT;
-    term.iflag.INPCK = !term.iflag.INPCK;
-    term.iflag.ISTRIP = !term.iflag.ISTRIP;
-    term.oflag.OPOST = !term.oflag.OPOST;
-    term.cflag.CSIZE = posix.CSIZE.CS8;
-    term.cc[@intFromEnum(posix.V.MIN)] = 0;
-    term.cc[@intFromEnum(posix.V.TIME)] = 1;
-    try posix.tcsetattr(handle, .NOW, term);
-}
-pub fn disableRawMode(handle: posix.fd_t, writer: *const std.fs.File) !void {
-    // Clear screen and move cursort to the top left.
-    try writer.writeAll("\x1b[H\x1b[2J");
-    try posix.tcsetattr(handle, .NOW, state.orig_term);
 }
 
 fn editorReadKey() !u16 {
@@ -517,6 +492,7 @@ const Editor = struct {
     stdin_buffer: [1024]u8,
     state: *Buffer,
     mode: Mode,
+    orig_term: posix.system.termios,
 
     fn init(allocator: std.mem.Allocator) !*Editor {
         var self = try allocator.create(Editor);
@@ -534,13 +510,38 @@ const Editor = struct {
         self.state = &state;
         self.mode = Mode.normal;
 
-        try enableRawMode(self.handle);
+        try self.enableRawMode(self.handle);
         try state.reset(&self.stdout, &self.reader, self.allocator);
         return self;
     }
 
+    fn enableRawMode(self: *Editor, handle: posix.fd_t) !void {
+        self.orig_term = try posix.tcgetattr(handle);
+        var term = self.orig_term;
+        term.lflag.ECHO = !term.lflag.ECHO;
+        term.lflag.ISIG = !term.lflag.ISIG;
+        term.lflag.ICANON = !term.lflag.ICANON;
+        term.lflag.IEXTEN = !term.lflag.IEXTEN;
+        term.iflag.IXON = !term.iflag.IXON;
+        term.iflag.ICRNL = !term.iflag.ICRNL;
+        term.iflag.BRKINT = !term.iflag.BRKINT;
+        term.iflag.INPCK = !term.iflag.INPCK;
+        term.iflag.ISTRIP = !term.iflag.ISTRIP;
+        term.oflag.OPOST = !term.oflag.OPOST;
+        term.cflag.CSIZE = posix.CSIZE.CS8;
+        term.cc[@intFromEnum(posix.V.MIN)] = 0;
+        term.cc[@intFromEnum(posix.V.TIME)] = 1;
+        try posix.tcsetattr(handle, .NOW, term);
+    }
+
+    pub fn disableRawMode(self: *Editor, handle: posix.fd_t, writer: *const std.fs.File) !void {
+        // Clear screen and move cursort to the top left.
+        try writer.writeAll("\x1b[H\x1b[2J");
+        try posix.tcsetattr(handle, .NOW, self.orig_term);
+    }
+
     fn deinit(self: *Editor) void {
-        disableRawMode(self.handle, &self.stdout) catch |err| {
+        self.disableRawMode(self.handle, &self.stdout) catch |err| {
             std.debug.print("Failed to restore the original terminal mode: {}", .{err});
         };
         self.state.deinit();
