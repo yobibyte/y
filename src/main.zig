@@ -764,15 +764,24 @@ fn editorPrompt(prompt: []const u8) !?[]u8 {
 
 const Editor = struct {
     allocator: std.mem.Allocator,
+    stdin: std.fs.File,
     stdout: std.fs.File,
     handle: std.posix.fd_t,
+    reader: std.fs.File.Reader,
+    stdin_buffer: [1024]u8,
 
-    fn init(allocator: std.mem.Allocator, stdout: std.fs.File, handle: std.posix.fd_t) !*Editor {
+    fn init(allocator: std.mem.Allocator) !*Editor {
         var self = try allocator.create(Editor);
         self.allocator = allocator;
-        self.stdout = stdout;
-        self.handle = handle;
-        try enableRawMode(handle);
+
+        self.stdin = std.fs.File.stdin();
+        self.stdout = std.fs.File.stdout();
+        self.stdin_buffer = undefined;
+        self.reader = self.stdin.reader(&self.stdin_buffer);
+        self.handle = self.stdin.handle;
+
+        try enableRawMode(self.handle);
+        try state.reset(&self.stdout, &self.reader, self.allocator);
         return self;
     }
 
@@ -792,16 +801,9 @@ pub fn main() !void {
         .ok => {},
     };
 
-    const stdin = std.fs.File.stdin();
-    const stdout = std.fs.File.stdout();
-    var stdin_buffer: [1024]u8 = undefined;
-    var reader = stdin.reader(&stdin_buffer);
-    const handle = stdin.handle;
-
-    const editor = try Editor.init(gpa.allocator(), stdout, handle);
+    const editor = try Editor.init(gpa.allocator());
     defer editor.deinit();
 
-    try state.reset(&stdout, &reader, editor.allocator);
     if (std.os.argv.len > 1) {
         try editorOpen(std.mem.span(std.os.argv[1]));
     }

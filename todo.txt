@@ -1,8 +1,6 @@
 ---------
 There is something wrong with the boundary check on the bottom most row. Sometimes, I cannot move to the new row, sometimes, I get move one row past it.
 ---------
-Get rid of arena allocator and use gpa
----------
 Incapsulate editor behaviour, move state to the new Editor struct.
 ---------
 Right now, if I add a char and remove it immediately, this will not reset the dirty.
