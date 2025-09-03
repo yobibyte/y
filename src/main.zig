@@ -130,7 +130,6 @@ const EditorState = struct {
     confirm_to_quit: bool, // if set, quit without confirmation, reset when pressed Ctrl+Q once.
     stdout: *const std.fs.File,
     reader: *std.fs.File.Reader,
-    mode: Mode,
     comment_chars: []const u8,
 
     fn rowsToString(self: *EditorState) ![]u8 {
@@ -172,7 +171,6 @@ const EditorState = struct {
         self.confirm_to_quit = true;
         self.stdout = writer;
         self.reader = reader;
-        self.mode = Mode.normal;
         self.comment_chars = "//";
     }
 
@@ -300,108 +298,6 @@ fn editorCommentLine() !void {
     state.dirty += 1;
 }
 
-fn editorProcessKeypressNormal(c: u16) !bool {
-    switch (c) {
-        0 => return true, // 0 is EndOfStream.
-        'h' => editorMoveCursor(KEY_LEFT),
-        'j' => editorMoveCursor(KEY_DOWN),
-        'k' => editorMoveCursor(KEY_UP),
-        'l' => editorMoveCursor(KEY_RIGHT),
-        'i' => state.mode = Mode.insert,
-        's' => try editorSave(),
-        'q' => return editorQuit(),
-        'x', KEY_DEL => {
-            if (state.cy < state.rows.items.len) {
-                if (state.cx < state.rows.items[state.cy].content.len) {
-                    editorMoveCursor(KEY_RIGHT);
-                }
-                try editorDelCharToLeft();
-            }
-        },
-        'G' => state.cy = state.rows.items.len - 1,
-        // Example of using a command prompt.
-        KEY_PROMPT => {
-            const maybe_cmd = try editorPrompt(":");
-            if (maybe_cmd) |cmd| {
-                defer state.allocator.free(cmd);
-                if (std.mem.eql(u8, cmd, "c")) {
-                    try editorCommentLine();
-                } else {
-                    const number = std.fmt.parseInt(usize, cmd, 10) catch 0;
-                    if (number > 0 and number <= state.rows.items.len) {
-                        state.cy = number - 1;
-                    }
-                }
-            }
-        },
-        else => {
-            state.mode = Mode.normal;
-        },
-    }
-
-    state.confirm_to_quit = true;
-    return true;
-}
-fn editorProcessKeypressInsert(c: u16) !bool {
-    switch (c) {
-        0 => return true, // 0 is EndOfStream.
-        '\r' => try editorInsertNewLine(),
-        ctrlKey('q') => return editorQuit(),
-        KEY_UP, KEY_DOWN, KEY_RIGHT, KEY_LEFT => editorMoveCursor(c),
-        KEY_BACKSPACE, KEY_DEL, ctrlKey('h') => {
-            if (c == KEY_DEL) {
-                // We should be joining the two rows in here in the insert mode.
-                if (state.cy < state.rows.items.len) {
-                    if (state.cx == state.rows.items[state.cy].content.len) {
-                        state.cx = 0;
-                        editorMoveCursor(KEY_DOWN);
-                    } else {
-                        editorMoveCursor(KEY_RIGHT);
-                    }
-                    try editorDelCharToLeft();
-                }
-            } else {
-                try editorDelCharToLeft();
-            }
-        },
-        KEY_PGUP, KEY_PGDOWN => {
-            if (c == KEY_PGUP) {
-                state.cy = state.rowoffset;
-            } else {
-                state.cy = state.rowoffset + state.screenrows - 1;
-                if (state.cy > state.rows.items.len) {
-                    state.cy = state.rows.items.len;
-                }
-            }
-            for (0..state.screenrows) |_| {
-                editorMoveCursor(if (c == KEY_PGUP) KEY_UP else KEY_DOWN);
-            }
-        },
-        ctrlKey('s') => try editorSave(),
-        KEY_HOME => {
-            state.cx = 0;
-        },
-        KEY_END => {
-            if (state.cy < state.rows.items.len) {
-                state.cx = state.rows.items[state.cy].content.len;
-            }
-        },
-
-        ctrlKey('l'), '\x1b' => {
-            state.mode = Mode.normal;
-        },
-        else => {
-            const casted_char = std.math.cast(u8, c) orelse return error.ValueTooBig;
-            if (!std.ascii.isControl(casted_char)) {
-                try editorInsertChar(casted_char);
-            }
-        },
-    }
-    // Reset confirmation flag when any other key than Ctrl+q was typed.
-    state.confirm_to_quit = true;
-    return true;
-}
-
 fn editorScroll() void {
     state.rx = 0;
     if (state.cy < state.rows.items.len) {
@@ -421,25 +317,6 @@ fn editorScroll() void {
         state.coloffset = state.rx - state.screencols + 1;
     }
 }
-fn editorRefreshScreen() !void {
-    editorScroll();
-    // TODO: Make this bigger?
-    var str_buf = try String.init(80, state.allocator);
-    defer str_buf.deinit();
-
-    try str_buf.append("\x1b[?25l");
-    try str_buf.append("\x1b[H");
-    try editorDrawRows(str_buf);
-    try editorDrawStatusBar(str_buf);
-    try editorDrawMessageBar(str_buf);
-    var buf: [20]u8 = undefined;
-    const escape_code = try std.fmt.bufPrint(&buf, "\x1b[{d};{d}H", .{ state.cy - state.rowoffset + 1, state.rx - state.coloffset + 1 });
-    try str_buf.append(escape_code);
-
-    try str_buf.append("\x1b[?25h");
-    try state.stdout.writeAll(str_buf.content());
-}
-
 fn editorDrawRows(str_buffer: *String) !void {
     for (0..state.screenrows) |crow| {
         const filerow = state.rowoffset + crow;
@@ -483,37 +360,6 @@ fn editorDrawMessageBar(str_buffer: *String) !void {
     if (state.statusmsg.len > 0 and std.time.timestamp() - state.statusmsg_time < config.STATUS_MSG_DURATION_SEC) {
         try str_buffer.append(state.statusmsg);
     }
-}
-
-fn editorDrawStatusBar(str_buffer: *String) !void {
-    try str_buffer.append("\x1b[7m");
-
-    // Reserve space for lines.
-    var lbuffer: [100]u8 = undefined;
-    const lines = try std.fmt.bufPrint(&lbuffer, " {s} {d}/{d}", .{ @tagName(state.mode), state.cy + 1, state.rows.items.len });
-
-    const mod_string = if (state.dirty > 0) " (modified)" else "";
-    const emptyspots = state.screencols - lines.len - mod_string.len;
-
-    // Should we truncate from the left? What does vim do?
-    var fname = state.filename orelse "[no name]";
-    if (fname.len > emptyspots) {
-        fname = fname[0..emptyspots];
-    }
-    try str_buffer.append(fname);
-    try str_buffer.append(mod_string);
-
-    const nspaces = emptyspots - fname.len;
-    if (nspaces > 0) {
-        const spaces_mem = try state.allocator.alloc(u8, nspaces);
-        @memset(spaces_mem, ' ');
-        try str_buffer.append(spaces_mem);
-        state.allocator.free(spaces_mem);
-    }
-
-    try str_buffer.append(lines);
-    try str_buffer.append("\x1b[m");
-    try str_buffer.append("\r\n");
 }
 
 fn editorMoveCursor(key: u16) void {
@@ -580,30 +426,6 @@ fn getWindowSize(writer: *const std.fs.File) ![2]usize {
     }
 }
 
-fn editorOpen(fname: []const u8) !void {
-    const file = try std.fs.cwd().openFile(fname, .{ .mode = .read_only });
-    defer file.close();
-
-    // Wrap the file in a buffered reader
-    var stdin_buffer: [1024]u8 = undefined;
-    var reader = file.reader(&stdin_buffer);
-
-    while (true) {
-        const line = reader.interface.takeDelimiterExclusive('\n') catch |err| {
-            switch (err) {
-                error.EndOfStream => break,
-                else => return err,
-            }
-        };
-        try editorInsertRow(state.rows.items.len, line);
-    }
-    state.filename = try state.allocator.dupe(u8, fname);
-    editorSetCommentChars();
-
-    // AppendRow modifies the dirty counter -> reset.
-    state.dirty = 0;
-}
-
 fn editorSetCommentChars() void {
     const fname = state.filename orelse return;
     if (std.mem.endsWith(u8, fname, ".py")) {
@@ -627,37 +449,6 @@ fn editorInsertChar(c: u8) !void {
     }
     try state.rows.items[state.cy].insertChar(c, state.cx);
     state.cx += 1;
-}
-
-fn editorSave() !void {
-    if (state.filename == null) {
-        const prompt = try editorPrompt("Save as: ");
-        if (prompt) |fname| {
-            defer state.allocator.free(fname);
-            state.filename = try state.allocator.dupe(u8, fname);
-        }
-    }
-    if (state.filename) |fname| {
-        editorSetCommentChars();
-        const buf = try state.rowsToString();
-        defer state.allocator.free(buf);
-        const file = try std.fs.cwd().createFile(fname, .{ .truncate = true });
-        defer file.close();
-
-        file.writeAll(buf) catch |err| {
-            var err_buf: [100]u8 = undefined;
-            const failure_msg = try std.fmt.bufPrint(&err_buf, "Failed to save a file: {}", .{err});
-            try editorSetStatusMessage(failure_msg);
-            return;
-        };
-        var fmt_buf: [100]u8 = undefined;
-        const success_msg = try std.fmt.bufPrint(&fmt_buf, "{d} bytes written to disk.", .{buf.len});
-        try editorSetStatusMessage(success_msg);
-        state.dirty = 0;
-    } else {
-        try editorSetStatusMessage("Save aborted.");
-        return;
-    }
 }
 
 fn editorSetStatusMessage(msg: []const u8) !void {
@@ -717,51 +508,6 @@ fn editorInsertNewLine() !void {
     state.dirty += 1;
 }
 
-fn editorPrompt(prompt: []const u8) !?[]u8 {
-    var command_buf = try state.allocator.alloc(u8, 80);
-    var command_buf_len: usize = prompt.len;
-    const promptlen = prompt.len;
-    std.mem.copyForwards(u8, command_buf[0..promptlen], prompt);
-
-    while (true) {
-        try editorSetStatusMessage(command_buf[0..command_buf_len]);
-        try editorRefreshScreen();
-
-        const c: u16 = try editorReadKey();
-
-        if (c == KEY_DEL or c == ctrlKey('h') or c == KEY_BACKSPACE) {
-            // we should be able to move around here and DEL should behave differently from BACKSPACE.
-            if (command_buf_len != promptlen) {
-                command_buf_len -= 1;
-            }
-        } else if (c == '\x1b') {
-            try editorSetStatusMessage("");
-            return null;
-        } else if (c == '\r') {
-            if (command_buf_len != 0) {
-                try editorSetStatusMessage("");
-                const new_buffer = try state.allocator.alloc(u8, command_buf_len - promptlen);
-                @memcpy(new_buffer, command_buf[promptlen..command_buf_len]);
-                state.allocator.free(command_buf);
-                return new_buffer;
-            }
-        } else if (c > 0 and c < 128) {
-            const casted_char = std.math.cast(u8, c) orelse return error.ValueTooBig;
-            if (!std.ascii.isControl(casted_char)) {
-                const curlen = command_buf.len;
-                if (command_buf_len == curlen - 1) {
-                    const new_command_buf = try state.allocator.alloc(u8, 2 * curlen);
-                    std.mem.copyForwards(u8, new_command_buf[0..curlen], command_buf[0..curlen]);
-                    defer state.allocator.free(command_buf);
-                    command_buf = new_command_buf;
-                }
-                command_buf[command_buf_len] = casted_char;
-                command_buf_len += 1;
-            }
-        }
-    }
-}
-
 const Editor = struct {
     allocator: std.mem.Allocator,
     stdin: std.fs.File,
@@ -769,6 +515,8 @@ const Editor = struct {
     handle: std.posix.fd_t,
     reader: std.fs.File.Reader,
     stdin_buffer: [1024]u8,
+    state: *EditorState,
+    mode: Mode,
 
     fn init(allocator: std.mem.Allocator) !*Editor {
         var self = try allocator.create(Editor);
@@ -780,6 +528,12 @@ const Editor = struct {
         self.reader = self.stdin.reader(&self.stdin_buffer);
         self.handle = self.stdin.handle;
 
+        // This is temporal. I will split the state into two parts:
+        // Some of the editor-level vars will move to just Editor fields.
+        // The rest, like Rows, will become buffers, and editor will keep a list (or a map) of buffers.
+        self.state = &state;
+        self.mode = Mode.normal;
+
         try enableRawMode(self.handle);
         try state.reset(&self.stdout, &self.reader, self.allocator);
         return self;
@@ -789,8 +543,269 @@ const Editor = struct {
         disableRawMode(self.handle, &self.stdout) catch |err| {
             std.debug.print("Failed to restore the original terminal mode: {}", .{err});
         };
-        state.deinit();
+        self.state.deinit();
         self.allocator.destroy(self);
+    }
+
+    fn open(self: *Editor, fname: []const u8) !void {
+        const file = try std.fs.cwd().openFile(fname, .{ .mode = .read_only });
+        defer file.close();
+
+        // Wrap the file in a buffered reader
+        var stdin_buffer: [1024]u8 = undefined;
+        var reader = file.reader(&stdin_buffer);
+
+        while (true) {
+            const line = reader.interface.takeDelimiterExclusive('\n') catch |err| {
+                switch (err) {
+                    error.EndOfStream => break,
+                    else => return err,
+                }
+            };
+            try editorInsertRow(self.state.rows.items.len, line);
+        }
+        self.state.filename = try state.allocator.dupe(u8, fname);
+        editorSetCommentChars();
+
+        // InsertRow calls above modify the dirty counter -> reset.
+        self.state.dirty = 0;
+    }
+
+    fn processKeypress(self: *Editor, c: u16) !bool {
+        return switch (self.mode) {
+            Mode.normal => try self.processKeypressNormal(c),
+            Mode.insert => try self.processKeypressInsert(c),
+        };
+    }
+
+    fn processKeypressNormal(self: *Editor, c: u16) !bool {
+        switch (c) {
+            0 => return true, // 0 is EndOfStream.
+            'h' => editorMoveCursor(KEY_LEFT),
+            'j' => editorMoveCursor(KEY_DOWN),
+            'k' => editorMoveCursor(KEY_UP),
+            'l' => editorMoveCursor(KEY_RIGHT),
+            'i' => self.mode = Mode.insert,
+            's' => try self.save(),
+            'q' => return editorQuit(),
+            'x', KEY_DEL => {
+                if (state.cy < state.rows.items.len) {
+                    if (state.cx < state.rows.items[state.cy].content.len) {
+                        editorMoveCursor(KEY_RIGHT);
+                    }
+                    try editorDelCharToLeft();
+                }
+            },
+            'G' => state.cy = state.rows.items.len - 1,
+            // Example of using a command prompt.
+            KEY_PROMPT => {
+                const maybe_cmd = try self.editorPrompt(":");
+                if (maybe_cmd) |cmd| {
+                    defer state.allocator.free(cmd);
+                    if (std.mem.eql(u8, cmd, "c")) {
+                        try editorCommentLine();
+                    } else {
+                        const number = std.fmt.parseInt(usize, cmd, 10) catch 0;
+                        if (number > 0 and number <= state.rows.items.len) {
+                            state.cy = number - 1;
+                        }
+                    }
+                }
+            },
+            else => {
+                self.mode = Mode.normal;
+            },
+        }
+
+        state.confirm_to_quit = true;
+        return true;
+    }
+
+    fn processKeypressInsert(self: *Editor, c: u16) !bool {
+        switch (c) {
+            0 => return true, // 0 is EndOfStream.
+            '\r' => try editorInsertNewLine(),
+            ctrlKey('q') => return editorQuit(),
+            KEY_UP, KEY_DOWN, KEY_RIGHT, KEY_LEFT => editorMoveCursor(c),
+            KEY_BACKSPACE, KEY_DEL, ctrlKey('h') => {
+                if (c == KEY_DEL) {
+                    // We should be joining the two rows in here in the insert mode.
+                    if (state.cy < state.rows.items.len) {
+                        if (state.cx == state.rows.items[state.cy].content.len) {
+                            state.cx = 0;
+                            editorMoveCursor(KEY_DOWN);
+                        } else {
+                            editorMoveCursor(KEY_RIGHT);
+                        }
+                        try editorDelCharToLeft();
+                    }
+                } else {
+                    try editorDelCharToLeft();
+                }
+            },
+            KEY_PGUP, KEY_PGDOWN => {
+                if (c == KEY_PGUP) {
+                    state.cy = state.rowoffset;
+                } else {
+                    state.cy = state.rowoffset + state.screenrows - 1;
+                    if (state.cy > state.rows.items.len) {
+                        state.cy = state.rows.items.len;
+                    }
+                }
+                for (0..state.screenrows) |_| {
+                    editorMoveCursor(if (c == KEY_PGUP) KEY_UP else KEY_DOWN);
+                }
+            },
+            ctrlKey('s') => try self.save(),
+            KEY_HOME => {
+                state.cx = 0;
+            },
+            KEY_END => {
+                if (state.cy < state.rows.items.len) {
+                    state.cx = state.rows.items[state.cy].content.len;
+                }
+            },
+
+            ctrlKey('l'), '\x1b' => {
+                self.mode = Mode.normal;
+            },
+            else => {
+                const casted_char = std.math.cast(u8, c) orelse return error.ValueTooBig;
+                if (!std.ascii.isControl(casted_char)) {
+                    try editorInsertChar(casted_char);
+                }
+            },
+        }
+        // Reset confirmation flag when any other key than Ctrl+q was typed.
+        state.confirm_to_quit = true;
+        return true;
+    }
+
+    fn drawStatusBar(self: *Editor, str_buffer: *String) !void {
+        try str_buffer.append("\x1b[7m");
+
+        // Reserve space for lines.
+        var lbuffer: [100]u8 = undefined;
+        const lines = try std.fmt.bufPrint(&lbuffer, " {s} {d}/{d}", .{ @tagName(self.mode), state.cy + 1, state.rows.items.len });
+
+        const mod_string = if (state.dirty > 0) " (modified)" else "";
+        const emptyspots = state.screencols - lines.len - mod_string.len;
+
+        // Should we truncate from the left? What does vim do?
+        var fname = state.filename orelse "[no name]";
+        if (fname.len > emptyspots) {
+            fname = fname[0..emptyspots];
+        }
+        try str_buffer.append(fname);
+        try str_buffer.append(mod_string);
+
+        const nspaces = emptyspots - fname.len;
+        if (nspaces > 0) {
+            const spaces_mem = try state.allocator.alloc(u8, nspaces);
+            @memset(spaces_mem, ' ');
+            try str_buffer.append(spaces_mem);
+            state.allocator.free(spaces_mem);
+        }
+
+        try str_buffer.append(lines);
+        try str_buffer.append("\x1b[m");
+        try str_buffer.append("\r\n");
+    }
+
+    fn refreshScreen(self: *Editor) !void {
+        editorScroll();
+        // TODO: Make this bigger?
+        var str_buf = try String.init(80, state.allocator);
+        defer str_buf.deinit();
+
+        try str_buf.append("\x1b[?25l");
+        try str_buf.append("\x1b[H");
+        try editorDrawRows(str_buf);
+        try self.drawStatusBar(str_buf);
+        try editorDrawMessageBar(str_buf);
+        var buf: [20]u8 = undefined;
+        const escape_code = try std.fmt.bufPrint(&buf, "\x1b[{d};{d}H", .{ state.cy - state.rowoffset + 1, state.rx - state.coloffset + 1 });
+        try str_buf.append(escape_code);
+
+        try str_buf.append("\x1b[?25h");
+        try state.stdout.writeAll(str_buf.content());
+    }
+
+    fn editorPrompt(self: *Editor, prompt: []const u8) !?[]u8 {
+        var command_buf = try state.allocator.alloc(u8, 80);
+        var command_buf_len: usize = prompt.len;
+        const promptlen = prompt.len;
+        std.mem.copyForwards(u8, command_buf[0..promptlen], prompt);
+
+        while (true) {
+            try editorSetStatusMessage(command_buf[0..command_buf_len]);
+            try self.refreshScreen();
+
+            const c: u16 = try editorReadKey();
+
+            if (c == KEY_DEL or c == ctrlKey('h') or c == KEY_BACKSPACE) {
+                // we should be able to move around here and DEL should behave differently from BACKSPACE.
+                if (command_buf_len != promptlen) {
+                    command_buf_len -= 1;
+                }
+            } else if (c == '\x1b') {
+                try editorSetStatusMessage("");
+                return null;
+            } else if (c == '\r') {
+                if (command_buf_len != 0) {
+                    try editorSetStatusMessage("");
+                    const new_buffer = try state.allocator.alloc(u8, command_buf_len - promptlen);
+                    @memcpy(new_buffer, command_buf[promptlen..command_buf_len]);
+                    state.allocator.free(command_buf);
+                    return new_buffer;
+                }
+            } else if (c > 0 and c < 128) {
+                const casted_char = std.math.cast(u8, c) orelse return error.ValueTooBig;
+                if (!std.ascii.isControl(casted_char)) {
+                    const curlen = command_buf.len;
+                    if (command_buf_len == curlen - 1) {
+                        const new_command_buf = try state.allocator.alloc(u8, 2 * curlen);
+                        std.mem.copyForwards(u8, new_command_buf[0..curlen], command_buf[0..curlen]);
+                        defer state.allocator.free(command_buf);
+                        command_buf = new_command_buf;
+                    }
+                    command_buf[command_buf_len] = casted_char;
+                    command_buf_len += 1;
+                }
+            }
+        }
+    }
+
+    // TODO: This should prob be on the buffer level.
+    fn save(self: *Editor) !void {
+        if (self.state.filename == null) {
+            const prompt = try self.editorPrompt("Save as: ");
+            if (prompt) |fname| {
+                defer state.allocator.free(fname);
+                state.filename = try state.allocator.dupe(u8, fname);
+            }
+        }
+        if (state.filename) |fname| {
+            editorSetCommentChars();
+            const buf = try state.rowsToString();
+            defer state.allocator.free(buf);
+            const file = try std.fs.cwd().createFile(fname, .{ .truncate = true });
+            defer file.close();
+
+            file.writeAll(buf) catch |err| {
+                var err_buf: [100]u8 = undefined;
+                const failure_msg = try std.fmt.bufPrint(&err_buf, "Failed to save a file: {}", .{err});
+                try editorSetStatusMessage(failure_msg);
+                return;
+            };
+            var fmt_buf: [100]u8 = undefined;
+            const success_msg = try std.fmt.bufPrint(&fmt_buf, "{d} bytes written to disk.", .{buf.len});
+            try editorSetStatusMessage(success_msg);
+            state.dirty = 0;
+        } else {
+            try editorSetStatusMessage("Save aborted.");
+            return;
+        }
     }
 };
 
@@ -805,16 +820,13 @@ pub fn main() !void {
     defer editor.deinit();
 
     if (std.os.argv.len > 1) {
-        try editorOpen(std.mem.span(std.os.argv[1]));
+        try editor.open(std.mem.span(std.os.argv[1]));
     }
 
     while (true) {
-        try editorRefreshScreen();
+        try editor.refreshScreen();
         const c = try editorReadKey();
-        const should_continue = switch (state.mode) {
-            Mode.normal => try editorProcessKeypressNormal(c),
-            Mode.insert => try editorProcessKeypressInsert(c),
-        };
+        const should_continue = try editor.processKeypress(c);
         if (!should_continue) {
             break;
         }
