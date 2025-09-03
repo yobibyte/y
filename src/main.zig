@@ -110,7 +110,7 @@ const String = struct {
         self.allocator.destroy(self);
     }
 };
-const EditorState = struct {
+const Buffer = struct {
     allocator: std.mem.Allocator,
     orig_term: posix.system.termios,
     screenrows: usize,
@@ -132,7 +132,7 @@ const EditorState = struct {
     reader: *std.fs.File.Reader,
     comment_chars: []const u8,
 
-    fn rowsToString(self: *EditorState) ![]u8 {
+    fn rowsToString(self: *Buffer) ![]u8 {
         var total_len: usize = 0;
         for (self.rows.items) |crow| {
             // 1 for the newline symbol.
@@ -153,7 +153,7 @@ const EditorState = struct {
         return buf;
     }
 
-    fn reset(self: *EditorState, writer: *const std.fs.File, reader: *std.fs.File.Reader, allocator: std.mem.Allocator) !void {
+    fn reset(self: *Buffer, writer: *const std.fs.File, reader: *std.fs.File.Reader, allocator: std.mem.Allocator) !void {
         self.allocator = allocator;
         self.cx = 0;
         self.rx = 0;
@@ -174,7 +174,7 @@ const EditorState = struct {
         self.comment_chars = "//";
     }
 
-    fn deinit(self: *EditorState) void {
+    fn deinit(self: *Buffer) void {
         for (self.rows.items) |crow| {
             crow.deinit();
         }
@@ -185,7 +185,7 @@ const EditorState = struct {
         state.allocator.free(state.statusmsg);
     }
 };
-pub var state: EditorState = undefined;
+pub var state: Buffer = undefined;
 
 inline fn ctrlKey(k: u8) u8 {
     return k & 0x1f;
@@ -515,7 +515,7 @@ const Editor = struct {
     handle: std.posix.fd_t,
     reader: std.fs.File.Reader,
     stdin_buffer: [1024]u8,
-    state: *EditorState,
+    state: *Buffer,
     mode: Mode,
 
     fn init(allocator: std.mem.Allocator) !*Editor {
