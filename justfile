@@ -10,3 +10,5 @@ install:
 lint:
     zig fmt
 
+lines:
+    find src/ -type f -exec wc -l {} +
