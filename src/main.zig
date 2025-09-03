@@ -764,16 +764,24 @@ fn editorPrompt(prompt: []const u8) !?[]u8 {
 
 const Editor = struct {
     allocator: std.mem.Allocator,
+    stdout: std.fs.File,
+    handle: std.posix.fd_t,
 
-    fn init(allocator: std.mem.Allocator) !*Editor {
+    fn init(allocator: std.mem.Allocator, stdout: std.fs.File, handle: std.posix.fd_t) !*Editor {
         var self = try allocator.create(Editor);
         self.allocator = allocator;
+        self.stdout = stdout;
+        self.handle = handle;
+        try enableRawMode(handle);
         return self;
     }
 
     fn deinit(self: *Editor) void {
-        self.allocator.destroy(self);
+        disableRawMode(self.handle, &self.stdout) catch |err| {
+            std.debug.print("Failed to restore the original terminal mode: {}", .{err});
+        };
         state.deinit();
+        self.allocator.destroy(self);
     }
 };
 
@@ -783,8 +791,6 @@ pub fn main() !void {
         .leak => std.debug.panic("Some memory leaked!", .{}),
         .ok => {},
     };
-    const editor = try Editor.init(gpa.allocator());
-    defer editor.deinit();
 
     const stdin = std.fs.File.stdin();
     const stdout = std.fs.File.stdout();
@@ -792,12 +798,10 @@ pub fn main() !void {
     var reader = stdin.reader(&stdin_buffer);
     const handle = stdin.handle;
 
-    try enableRawMode(handle);
-    defer disableRawMode(handle, &stdout) catch |err| {
-        std.debug.print("Failed to restore the original terminal mode: {}", .{err});
-    };
+    const editor = try Editor.init(gpa.allocator(), stdout, handle);
+    defer editor.deinit();
 
-    try state.reset(&stdout, &reader, gpa.allocator());
+    try state.reset(&stdout, &reader, editor.allocator);
     if (std.os.argv.len > 1) {
         try editorOpen(std.mem.span(std.os.argv[1]));
     }

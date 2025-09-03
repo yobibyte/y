@@ -1,4 +1,4 @@
-asdfasdfasdfasdasdfasdf//# y: yobibyte's text editor
+# y: yobibyte's text editor
 
 `y` is a highly opionated text editor written by yobibyte.
 It started as following the[kilo](https://viewsourcecode.org/snaptoken/kilo/index.html) tutorial in Zig, but grew out in something bigger.
