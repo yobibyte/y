@@ -33,12 +33,8 @@
 //                 /(/#(((/*/#****/*,/*.
 
 const std = @import("std");
-const config = @import("config.zig");
-const row = @import("row.zig");
 const editor = @import("editor.zig");
-const str = @import("string.zig");
 const buffer = @import("buffer.zig");
-const posix = std.posix;
 
 pub var state: buffer.Buffer = undefined;
 
