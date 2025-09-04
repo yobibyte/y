@@ -54,7 +54,7 @@ pub fn main() !void {
 
     while (true) {
         try ed.refreshScreen();
-        const c = try editor.editorReadKey();
+        const c = try ed.readKey();
         const should_continue = try ed.processKeypress(c);
         if (!should_continue) {
             break;
