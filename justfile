@@ -11,4 +11,4 @@ lint:
     zig fmt
 
 lines:
-    find src/ -type f -exec wc -l {} +
+    find src/ -type f ! -name '*.swp' -exec wc -l {} +
