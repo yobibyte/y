@@ -1,8 +1,6 @@
 ---------
 There is something wrong with the boundary check on the bottom most row. Sometimes, I cannot move to the new row, sometimes, I get move one row past it.
 ---------
-Split state into 2 parts: editor-related stuff, and a buffer-related stuff. Get ready for a list of buffers.
----------
 Right now, if I add a char and remove it immediately, this will not reset the dirty.
 // How do we address those?
 ---------
@@ -17,3 +15,5 @@ Learn how to set the max field width dynamically in zig.
 Fully switch to the new reader/writer API, do not use the oldreader 
 ---------
 Figure out how to process multi-key commands with modifiers: e.g. 3w
+---------
+Move some of the editor functionality to buffers, e.g. commentRow.

@@ -49,7 +49,7 @@ pub const Editor = struct {
     handle: std.posix.fd_t,
     reader: std.fs.File.Reader,
     stdin_buffer: [1024]u8,
-    state: *buffer.Buffer,
+    cur_buffer: *buffer.Buffer,
     mode: Mode,
     orig_term: posix.system.termios,
     screenrows: usize,
@@ -74,13 +74,13 @@ pub const Editor = struct {
         // This is temporal. I will split the state into two parts:
         // Some of the editor-level vars will move to just Editor fields.
         // The rest, like Rows, will become buffers, and editor will keep a list (or a map) of buffers.
-        self.state = undefined;
+        self.cur_buffer = undefined;
         self.mode = Mode.normal;
         self.statusmsg = "";
         self.statusmsg_time = 0;
 
         try self.enableRawMode(self.handle);
-        self.state = try buffer.Buffer.init(self.allocator, self.screenrows, self.screencols);
+        self.cur_buffer = try buffer.Buffer.init(self.allocator, self.screenrows, self.screencols);
         return self;
     }
 
@@ -113,7 +113,7 @@ pub const Editor = struct {
         self.disableRawMode(self.handle, &self.stdout) catch |err| {
             std.debug.print("Failed to restore the original terminal mode: {}", .{err});
         };
-        self.state.deinit();
+        self.cur_buffer.deinit();
         self.allocator.free(self.statusmsg);
         self.allocator.destroy(self);
     }
@@ -133,13 +133,13 @@ pub const Editor = struct {
                     else => return err,
                 }
             };
-            try self.insertRow(self.state.rows.items.len, line);
+            try self.insertRow(self.cur_buffer.rows.items.len, line);
         }
-        self.state.filename = try self.allocator.dupe(u8, fname);
+        self.cur_buffer.filename = try self.allocator.dupe(u8, fname);
         self.setCommentChars();
 
         // InsertRow calls above modify the dirty counter -> reset.
-        self.state.dirty = 0;
+        self.cur_buffer.dirty = 0;
     }
 
     pub fn processKeypress(self: *Editor, c: u16) !bool {
@@ -151,7 +151,7 @@ pub const Editor = struct {
 
     fn processKeypressNormal(self: *Editor, c: u16) !bool {
         // To be replace by current buffer.
-        const state = self.state;
+        const state = self.cur_buffer;
         switch (c) {
             0 => return true, // 0 is EndOfStream.
             'h' => self.moveCursor(KEY_LEFT),
@@ -196,7 +196,7 @@ pub const Editor = struct {
 
     fn processKeypressInsert(self: *Editor, c: u16) !bool {
         // To be replace by current buffer.
-        const state = self.state;
+        const state = self.cur_buffer;
         switch (c) {
             0 => return true, // 0 is EndOfStream.
             '\r' => try self.insertNewLine(),
@@ -261,13 +261,13 @@ pub const Editor = struct {
 
         // Reserve space for lines.
         var lbuffer: [100]u8 = undefined;
-        const lines = try std.fmt.bufPrint(&lbuffer, " {s} {d}/{d}", .{ @tagName(self.mode), self.state.cy + 1, self.state.rows.items.len });
+        const lines = try std.fmt.bufPrint(&lbuffer, " {s} {d}/{d}", .{ @tagName(self.mode), self.cur_buffer.cy + 1, self.cur_buffer.rows.items.len });
 
-        const mod_string = if (self.state.dirty > 0) " (modified)" else "";
-        const emptyspots = self.state.screencols - lines.len - mod_string.len;
+        const mod_string = if (self.cur_buffer.dirty > 0) " (modified)" else "";
+        const emptyspots = self.cur_buffer.screencols - lines.len - mod_string.len;
 
         // Should we truncate from the left? What does vim do?
-        var fname = self.state.filename orelse "[no name]";
+        var fname = self.cur_buffer.filename orelse "[no name]";
         if (fname.len > emptyspots) {
             fname = fname[0..emptyspots];
         }
@@ -299,7 +299,7 @@ pub const Editor = struct {
         try self.drawStatusBar(str_buf);
         try self.drawMessageBar(str_buf);
         var buf: [20]u8 = undefined;
-        const escape_code = try std.fmt.bufPrint(&buf, "\x1b[{d};{d}H", .{ self.state.cy - self.state.rowoffset + 1, self.state.rx - self.state.coloffset + 1 });
+        const escape_code = try std.fmt.bufPrint(&buf, "\x1b[{d};{d}H", .{ self.cur_buffer.cy - self.cur_buffer.rowoffset + 1, self.cur_buffer.rx - self.cur_buffer.coloffset + 1 });
         try str_buf.append(escape_code);
 
         try str_buf.append("\x1b[?25h");
@@ -353,16 +353,16 @@ pub const Editor = struct {
 
     // TODO: This should prob be on the buffer level.
     fn save(self: *Editor) !void {
-        if (self.state.filename == null) {
+        if (self.cur_buffer.filename == null) {
             const prompt = try self.get_prompt("Save as: ");
             if (prompt) |fname| {
                 defer self.allocator.free(fname);
-                self.state.filename = try self.allocator.dupe(u8, fname);
+                self.cur_buffer.filename = try self.allocator.dupe(u8, fname);
             }
         }
-        if (self.state.filename) |fname| {
+        if (self.cur_buffer.filename) |fname| {
             self.setCommentChars();
-            const buf = try self.state.rowsToString();
+            const buf = try self.cur_buffer.rowsToString();
             defer self.allocator.free(buf);
             const file = try std.fs.cwd().createFile(fname, .{ .truncate = true });
             defer file.close();
@@ -376,7 +376,7 @@ pub const Editor = struct {
             var fmt_buf: [100]u8 = undefined;
             const success_msg = try std.fmt.bufPrint(&fmt_buf, "{d} bytes written to disk.", .{buf.len});
             try self.setStatusMessage(success_msg);
-            self.state.dirty = 0;
+            self.cur_buffer.dirty = 0;
         } else {
             try self.setStatusMessage("Save aborted.");
             return;
@@ -438,8 +438,8 @@ pub const Editor = struct {
     }
 
     fn quit(self: *Editor) !bool {
-        if (self.state.dirty > 0 and self.state.confirm_to_quit) {
-            self.state.confirm_to_quit = false;
+        if (self.cur_buffer.dirty > 0 and self.cur_buffer.confirm_to_quit) {
+            self.cur_buffer.confirm_to_quit = false;
             try self.setStatusMessage("You have unsaved changes. Use the quit command again if you still want to quit.");
             return true;
         }
@@ -448,51 +448,51 @@ pub const Editor = struct {
 
     fn commentLine(self: *Editor) !void {
         var to_comment = true;
-        if (self.state.rows.items[self.state.cy].content.len >= self.state.comment_chars.len) {
-            to_comment = !std.mem.startsWith(u8, self.state.rows.items[self.state.cy].content, self.state.comment_chars);
+        if (self.cur_buffer.rows.items[self.cur_buffer.cy].content.len >= self.cur_buffer.comment_chars.len) {
+            to_comment = !std.mem.startsWith(u8, self.cur_buffer.rows.items[self.cur_buffer.cy].content, self.cur_buffer.comment_chars);
         }
-        for (self.state.comment_chars, 0..) |cs, i| {
+        for (self.cur_buffer.comment_chars, 0..) |cs, i| {
             if (to_comment) {
-                try self.state.rows.items[self.state.cy].insertChar(cs, i);
-                self.state.cx += 1;
+                try self.cur_buffer.rows.items[self.cur_buffer.cy].insertChar(cs, i);
+                self.cur_buffer.cx += 1;
             } else {
-                try self.state.rows.items[self.state.cy].delChar(0);
-                if (self.state.cx > 0) {
-                    self.state.cx -= 1;
+                try self.cur_buffer.rows.items[self.cur_buffer.cy].delChar(0);
+                if (self.cur_buffer.cx > 0) {
+                    self.cur_buffer.cx -= 1;
                 }
             }
         }
-        try self.state.rows.items[self.state.cy].update();
-        self.state.dirty += 1;
+        try self.cur_buffer.rows.items[self.cur_buffer.cy].update();
+        self.cur_buffer.dirty += 1;
     }
 
     fn scroll(self: *Editor) void {
-        self.state.rx = 0;
-        if (self.state.cy < self.state.rows.items.len) {
-            self.state.rx = self.state.rows.items[self.state.cy].cxToRx(self.state.cx);
+        self.cur_buffer.rx = 0;
+        if (self.cur_buffer.cy < self.cur_buffer.rows.items.len) {
+            self.cur_buffer.rx = self.cur_buffer.rows.items[self.cur_buffer.cy].cxToRx(self.cur_buffer.cx);
         }
 
-        if (self.state.cy < self.state.rowoffset) {
-            self.state.rowoffset = self.state.cy;
+        if (self.cur_buffer.cy < self.cur_buffer.rowoffset) {
+            self.cur_buffer.rowoffset = self.cur_buffer.cy;
         }
-        if (self.state.cy >= self.state.rowoffset + self.state.screenrows) {
-            self.state.rowoffset = self.state.cy - self.state.screenrows + 1;
+        if (self.cur_buffer.cy >= self.cur_buffer.rowoffset + self.cur_buffer.screenrows) {
+            self.cur_buffer.rowoffset = self.cur_buffer.cy - self.cur_buffer.screenrows + 1;
         }
-        if (self.state.rx < self.state.coloffset) {
-            self.state.coloffset = self.state.rx;
+        if (self.cur_buffer.rx < self.cur_buffer.coloffset) {
+            self.cur_buffer.coloffset = self.cur_buffer.rx;
         }
-        if (self.state.rx >= self.state.coloffset + self.state.screencols) {
-            self.state.coloffset = self.state.rx - self.state.screencols + 1;
+        if (self.cur_buffer.rx >= self.cur_buffer.coloffset + self.cur_buffer.screencols) {
+            self.cur_buffer.coloffset = self.cur_buffer.rx - self.cur_buffer.screencols + 1;
         }
     }
     fn drawRows(self: *Editor, str_buffer: *str.String) !void {
-        for (0..self.state.screenrows) |crow| {
-            const filerow = self.state.rowoffset + crow;
+        for (0..self.cur_buffer.screenrows) |crow| {
+            const filerow = self.cur_buffer.rowoffset + crow;
             // Erase in line, by default, erases everything to the right of cursor.
-            if (filerow >= self.state.rows.items.len) {
-                if (self.state.rows.items.len == 0 and crow == self.state.screenrows / 3) {
-                    if (self.state.screencols - welcome_msg.len >= 0) {
-                        const padding = (self.state.screencols - welcome_msg.len) / 2;
+            if (filerow >= self.cur_buffer.rows.items.len) {
+                if (self.cur_buffer.rows.items.len == 0 and crow == self.cur_buffer.screenrows / 3) {
+                    if (self.cur_buffer.screencols - welcome_msg.len >= 0) {
+                        const padding = (self.cur_buffer.screencols - welcome_msg.len) / 2;
                         if (padding > 0) {
                             try str_buffer.append("~");
                         }
@@ -505,13 +505,13 @@ pub const Editor = struct {
                     try str_buffer.append("~");
                 }
             } else {
-                const offset_row = self.state.rows.items[filerow].render;
-                if (offset_row.len >= self.state.coloffset) {
-                    var maxlen = offset_row.len - self.state.coloffset;
-                    if (maxlen > self.state.screencols) {
-                        maxlen = self.state.screencols;
+                const offset_row = self.cur_buffer.rows.items[filerow].render;
+                if (offset_row.len >= self.cur_buffer.coloffset) {
+                    var maxlen = offset_row.len - self.cur_buffer.coloffset;
+                    if (maxlen > self.cur_buffer.screencols) {
+                        maxlen = self.cur_buffer.screencols;
                     }
-                    try str_buffer.append(offset_row[self.state.coloffset .. self.state.coloffset + maxlen]);
+                    try str_buffer.append(offset_row[self.cur_buffer.coloffset .. self.cur_buffer.coloffset + maxlen]);
                 }
             }
             try str_buffer.append("\x1b[K");
@@ -523,7 +523,7 @@ pub const Editor = struct {
         try str_buffer.append("\x1b[K");
         var msg = self.statusmsg;
         if (self.statusmsg.len > self.screencols) {
-            msg = self.statusmsg[0..self.state.screencols];
+            msg = self.statusmsg[0..self.cur_buffer.screencols];
         }
         if (self.statusmsg.len > 0 and std.time.timestamp() - self.statusmsg_time < config.STATUS_MSG_DURATION_SEC) {
             try str_buffer.append(self.statusmsg);
@@ -533,114 +533,114 @@ pub const Editor = struct {
     fn moveCursor(self: *Editor, key: u16) void {
         switch (key) {
             KEY_LEFT => {
-                if (self.state.cx > 0) {
-                    self.state.cx -= 1;
+                if (self.cur_buffer.cx > 0) {
+                    self.cur_buffer.cx -= 1;
                 }
             },
             KEY_DOWN => {
-                if (self.state.cy < self.state.rows.items.len) {
-                    self.state.cy += 1;
+                if (self.cur_buffer.cy < self.cur_buffer.rows.items.len) {
+                    self.cur_buffer.cy += 1;
                 }
             },
             KEY_UP => {
-                if (self.state.cy > 0) {
-                    self.state.cy -= 1;
+                if (self.cur_buffer.cy > 0) {
+                    self.cur_buffer.cy -= 1;
                 }
             },
             KEY_RIGHT => {
-                if (self.state.cy < self.state.rows.items.len) {
-                    if (self.state.cx < self.state.rows.items[self.state.cy].content.len) {
-                        self.state.cx += 1;
+                if (self.cur_buffer.cy < self.cur_buffer.rows.items.len) {
+                    if (self.cur_buffer.cx < self.cur_buffer.rows.items[self.cur_buffer.cy].content.len) {
+                        self.cur_buffer.cx += 1;
                     }
                 }
             },
             else => return,
         }
-        const rowlen = if (self.state.cy < self.state.rows.items.len) self.state.rows.items[self.state.cy].content.len else 0;
-        if (self.state.cx > rowlen) {
-            self.state.cx = rowlen;
+        const rowlen = if (self.cur_buffer.cy < self.cur_buffer.rows.items.len) self.cur_buffer.rows.items[self.cur_buffer.cy].content.len else 0;
+        if (self.cur_buffer.cx > rowlen) {
+            self.cur_buffer.cx = rowlen;
         }
     }
 
     fn setCommentChars(self: *Editor) void {
-        const fname = self.state.filename orelse return;
+        const fname = self.cur_buffer.filename orelse return;
         if (std.mem.endsWith(u8, fname, ".py")) {
-            self.state.comment_chars = "#";
+            self.cur_buffer.comment_chars = "#";
         }
     }
 
     fn insertRow(self: *Editor, at: usize, line: []u8) !void {
-        if (at > self.state.rows.items.len) {
+        if (at > self.cur_buffer.rows.items.len) {
             return;
         }
-        try self.state.rows.insert(at, try row.Row.init(line, self.state.allocator));
+        try self.cur_buffer.rows.insert(at, try row.Row.init(line, self.cur_buffer.allocator));
 
-        try self.state.rows.items[at].update();
-        self.state.dirty += 1;
+        try self.cur_buffer.rows.items[at].update();
+        self.cur_buffer.dirty += 1;
     }
 
     fn insertChar(self: *Editor, c: u8) !void {
-        if (self.state.cy == self.state.rows.items.len) {
-            try self.insertRow(self.state.cy, "");
+        if (self.cur_buffer.cy == self.cur_buffer.rows.items.len) {
+            try self.insertRow(self.cur_buffer.cy, "");
         }
-        try self.state.rows.items[self.state.cy].insertChar(c, self.state.cx);
-        self.state.cx += 1;
+        try self.cur_buffer.rows.items[self.cur_buffer.cy].insertChar(c, self.cur_buffer.cx);
+        self.cur_buffer.cx += 1;
     }
 
     fn setStatusMessage(self: *Editor, msg: []const u8) !void {
         // There is some formatting magic in the tutorial version of this.
         // Would probably be nicer not to format string before every message, but it also
         // simpler to some extent.
-        self.state.allocator.free(self.statusmsg);
-        self.statusmsg = try self.state.allocator.dupe(u8, msg);
+        self.cur_buffer.allocator.free(self.statusmsg);
+        self.statusmsg = try self.cur_buffer.allocator.dupe(u8, msg);
         self.statusmsg_time = std.time.timestamp();
     }
 
     fn delCharToLeft(self: *Editor) !void {
-        if (self.state.cy == self.state.rows.items.len) {
+        if (self.cur_buffer.cy == self.cur_buffer.rows.items.len) {
             return;
         }
-        if (self.state.cx == 0 and self.state.cy == 0) {
+        if (self.cur_buffer.cx == 0 and self.cur_buffer.cy == 0) {
             return;
         }
         // How can it be smaller than zero?
-        var crow = self.state.rows.items[self.state.cy];
-        if (self.state.cx > 0) {
-            try crow.delChar(self.state.cx - 1);
-            self.state.cx -= 1;
+        var crow = self.cur_buffer.rows.items[self.cur_buffer.cy];
+        if (self.cur_buffer.cx > 0) {
+            try crow.delChar(self.cur_buffer.cx - 1);
+            self.cur_buffer.cx -= 1;
         } else {
             // Move cursor to the joint of two new rows.
-            var prev_row = self.state.rows.items[self.state.cy - 1];
-            self.state.cx = prev_row.content.len;
+            var prev_row = self.cur_buffer.rows.items[self.cur_buffer.cy - 1];
+            self.cur_buffer.cx = prev_row.content.len;
             // Join the two rows.
-            try prev_row.append(self.state.rows.items[self.state.cy].content);
-            self.delRow(self.state.cy); // Remove the current row
-            self.state.cy -= 1; // Move cursor up.
+            try prev_row.append(self.cur_buffer.rows.items[self.cur_buffer.cy].content);
+            self.delRow(self.cur_buffer.cy); // Remove the current row
+            self.cur_buffer.cy -= 1; // Move cursor up.
         }
         try crow.update();
-        self.state.dirty += 1;
+        self.cur_buffer.dirty += 1;
     }
 
     fn delRow(self: *Editor, at: usize) void {
-        if (at >= self.state.rows.items.len) {
+        if (at >= self.cur_buffer.rows.items.len) {
             return;
         }
-        const crow = self.state.rows.orderedRemove(at);
+        const crow = self.cur_buffer.rows.orderedRemove(at);
         crow.deinit();
-        self.state.dirty += 1;
+        self.cur_buffer.dirty += 1;
     }
 
     fn insertNewLine(self: *Editor) !void {
-        if (self.state.cx == 0) {
-            try self.insertRow(self.state.cy, "");
+        if (self.cur_buffer.cx == 0) {
+            try self.insertRow(self.cur_buffer.cy, "");
         } else {
-            var crow = self.state.rows.items[self.state.cy];
-            try self.insertRow(self.state.cy + 1, crow.content[self.state.cx..]);
-            crow.content = crow.content[0..self.state.cx];
+            var crow = self.cur_buffer.rows.items[self.cur_buffer.cy];
+            try self.insertRow(self.cur_buffer.cy + 1, crow.content[self.cur_buffer.cx..]);
+            crow.content = crow.content[0..self.cur_buffer.cx];
             try crow.update();
         }
-        self.state.cy += 1;
-        self.state.cx = 0;
-        self.state.dirty += 1;
+        self.cur_buffer.cy += 1;
+        self.cur_buffer.cx = 0;
+        self.cur_buffer.dirty += 1;
     }
 };
