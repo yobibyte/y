@@ -1,4 +1,6 @@
 ---------
+Implement rudimentary search from https://viewsourcecode.org/snaptoken/kilo/06.search.html
+---------
 There is something wrong with the boundary check on the bottom most row. Sometimes, I cannot move to the new row, sometimes, I get move one row past it.
 ---------
 Right now, if I add a char and remove it immediately, this will not reset the dirty.
@@ -16,4 +18,3 @@ Fully switch to the new reader/writer API, do not use the oldreader
 ---------
 Figure out how to process multi-key commands with modifiers: e.g. 3w
 ---------
-Move some of the editor functionality to buffers, e.g. commentRow.

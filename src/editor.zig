@@ -1,27 +1,12 @@
 const std = @import("std");
 const main = @import("main.zig");
-const str = @import("string.zig");
 const row = @import("row.zig");
+const str = @import("string.zig");
 const buffer = @import("buffer.zig");
 const config = @import("config.zig");
 const term = @import("term.zig");
 const posix = std.posix;
-
-// In the original tutorial, this is a enum.
-// But I do not want to create an element for every char.
-// Maybe there is a better way, but for now I'll keep it as is.
-// Give the keys values above char levels to use actual chars to edit text.
-const KEY_PROMPT = 32; // space
-const KEY_BACKSPACE = 127;
-const KEY_UP = 1000;
-const KEY_DOWN = 1001;
-const KEY_LEFT = 1002;
-const KEY_RIGHT = 1003;
-const KEY_PGUP = 1004;
-const KEY_PGDOWN = 1005;
-const KEY_HOME = 1006;
-const KEY_END = 1007;
-const KEY_DEL = 1008;
+const kb = @import("kb.zig");
 
 inline fn ctrlKey(k: u8) u8 {
     return k & 0x1f;
@@ -31,16 +16,6 @@ pub const Mode = enum {
     normal,
     insert,
 };
-
-const zon: struct {
-    name: enum { y },
-    version: []const u8,
-    fingerprint: u64,
-    minimum_zig_version: []const u8,
-    paths: []const []const u8,
-} = @import("zon_mod");
-
-const welcome_msg = "yobibyte's text editor, version " ++ zon.version ++ ".";
 
 pub const Editor = struct {
     allocator: std.mem.Allocator,
@@ -133,10 +108,10 @@ pub const Editor = struct {
                     else => return err,
                 }
             };
-            try self.insertRow(self.cur_buffer.rows.items.len, line);
+            try self.cur_buffer.insertRow(self.cur_buffer.rows.items.len, line);
         }
         self.cur_buffer.filename = try self.allocator.dupe(u8, fname);
-        self.setCommentChars();
+        self.cur_buffer.setCommentChars();
 
         // InsertRow calls above modify the dirty counter -> reset.
         self.cur_buffer.dirty = 0;
@@ -149,34 +124,38 @@ pub const Editor = struct {
         };
     }
 
+    fn moveCursor(self: *Editor, key: u16) void {
+        self.cur_buffer.moveCursor(key);
+    }
+
     fn processKeypressNormal(self: *Editor, c: u16) !bool {
         // To be replace by current buffer.
         const state = self.cur_buffer;
         switch (c) {
             0 => return true, // 0 is EndOfStream.
-            'h' => self.moveCursor(KEY_LEFT),
-            'j' => self.moveCursor(KEY_DOWN),
-            'k' => self.moveCursor(KEY_UP),
-            'l' => self.moveCursor(KEY_RIGHT),
+            'h' => self.moveCursor(kb.KEY_LEFT),
+            'j' => self.moveCursor(kb.KEY_DOWN),
+            'k' => self.moveCursor(kb.KEY_UP),
+            'l' => self.moveCursor(kb.KEY_RIGHT),
             'i' => self.mode = Mode.insert,
             's' => try self.save(),
             'q' => return self.quit(),
-            'x', KEY_DEL => {
+            'x', kb.KEY_DEL => {
                 if (state.cy < state.rows.items.len) {
                     if (state.cx < state.rows.items[state.cy].content.len) {
-                        self.moveCursor(KEY_RIGHT);
+                        self.moveCursor(kb.KEY_RIGHT);
                     }
-                    try self.delCharToLeft();
+                    try self.cur_buffer.delCharToLeft();
                 }
             },
             'G' => state.cy = state.rows.items.len - 1,
             // Example of using a command prompt.
-            KEY_PROMPT => {
+            kb.KEY_PROMPT => {
                 const maybe_cmd = try self.get_prompt(":");
                 if (maybe_cmd) |cmd| {
                     defer self.allocator.free(cmd);
                     if (std.mem.eql(u8, cmd, "c")) {
-                        try self.commentLine();
+                        try self.cur_buffer.commentLine();
                     } else {
                         const number = std.fmt.parseInt(usize, cmd, 10) catch 0;
                         if (number > 0 and number <= state.rows.items.len) {
@@ -199,27 +178,27 @@ pub const Editor = struct {
         const state = self.cur_buffer;
         switch (c) {
             0 => return true, // 0 is EndOfStream.
-            '\r' => try self.insertNewLine(),
+            '\r' => try self.cur_buffer.insertNewLine(),
             ctrlKey('q') => return self.quit(),
-            KEY_UP, KEY_DOWN, KEY_RIGHT, KEY_LEFT => self.moveCursor(c),
-            KEY_BACKSPACE, KEY_DEL, ctrlKey('h') => {
-                if (c == KEY_DEL) {
+            kb.KEY_UP, kb.KEY_DOWN, kb.KEY_RIGHT, kb.KEY_LEFT => self.moveCursor(c),
+            kb.KEY_BACKSPACE, kb.KEY_DEL, ctrlKey('h') => {
+                if (c == kb.KEY_DEL) {
                     // We should be joining the two rows in here in the insert mode.
                     if (state.cy < state.rows.items.len) {
                         if (state.cx == state.rows.items[state.cy].content.len) {
                             state.cx = 0;
-                            self.moveCursor(KEY_DOWN);
+                            self.moveCursor(kb.KEY_DOWN);
                         } else {
-                            self.moveCursor(KEY_RIGHT);
+                            self.moveCursor(kb.KEY_RIGHT);
                         }
-                        try self.delCharToLeft();
+                        try self.cur_buffer.delCharToLeft();
                     }
                 } else {
-                    try self.delCharToLeft();
+                    try self.cur_buffer.delCharToLeft();
                 }
             },
-            KEY_PGUP, KEY_PGDOWN => {
-                if (c == KEY_PGUP) {
+            kb.KEY_PGUP, kb.KEY_PGDOWN => {
+                if (c == kb.KEY_PGUP) {
                     state.cy = state.rowoffset;
                 } else {
                     state.cy = state.rowoffset + state.screenrows - 1;
@@ -228,14 +207,14 @@ pub const Editor = struct {
                     }
                 }
                 for (0..state.screenrows) |_| {
-                    self.moveCursor(if (c == KEY_PGUP) KEY_UP else KEY_DOWN);
+                    self.moveCursor(if (c == kb.KEY_PGUP) kb.KEY_UP else kb.KEY_DOWN);
                 }
             },
             ctrlKey('s') => try self.save(),
-            KEY_HOME => {
+            kb.KEY_HOME => {
                 state.cx = 0;
             },
-            KEY_END => {
+            kb.KEY_END => {
                 if (state.cy < state.rows.items.len) {
                     state.cx = state.rows.items[state.cy].content.len;
                 }
@@ -247,13 +226,24 @@ pub const Editor = struct {
             else => {
                 const casted_char = std.math.cast(u8, c) orelse return error.ValueTooBig;
                 if (!std.ascii.isControl(casted_char)) {
-                    try self.insertChar(casted_char);
+                    try self.cur_buffer.insertChar(casted_char);
                 }
             },
         }
         // Reset confirmation flag when any other key than Ctrl+q was typed.
         state.confirm_to_quit = true;
         return true;
+    }
+
+    fn drawMessageBar(self: *Editor, str_buffer: *str.String) !void {
+        try str_buffer.append("\x1b[K");
+        var msg = self.statusmsg;
+        if (self.statusmsg.len > self.screencols) {
+            msg = self.statusmsg[0..self.screencols];
+        }
+        if (self.statusmsg.len > 0 and std.time.timestamp() - self.statusmsg_time < config.STATUS_MSG_DURATION_SEC) {
+            try str_buffer.append(self.statusmsg);
+        }
     }
 
     fn drawStatusBar(self: *Editor, str_buffer: *str.String) !void {
@@ -288,14 +278,14 @@ pub const Editor = struct {
     }
 
     pub fn refreshScreen(self: *Editor) !void {
-        self.scroll();
+        self.cur_buffer.scroll();
         // TODO: Make this bigger?
         var str_buf = try str.String.init(80, self.allocator);
         defer str_buf.deinit();
 
         try str_buf.append("\x1b[?25l");
         try str_buf.append("\x1b[H");
-        try self.drawRows(str_buf);
+        try self.cur_buffer.drawRows(str_buf);
         try self.drawStatusBar(str_buf);
         try self.drawMessageBar(str_buf);
         var buf: [20]u8 = undefined;
@@ -318,7 +308,7 @@ pub const Editor = struct {
 
             const c: u16 = try self.readKey();
 
-            if (c == KEY_DEL or c == ctrlKey('h') or c == KEY_BACKSPACE) {
+            if (c == kb.KEY_DEL or c == ctrlKey('h') or c == kb.KEY_BACKSPACE) {
                 // we should be able to move around here and DEL should behave differently from BACKSPACE.
                 if (command_buf_len != promptlen) {
                     command_buf_len -= 1;
@@ -361,7 +351,7 @@ pub const Editor = struct {
             }
         }
         if (self.cur_buffer.filename) |fname| {
-            self.setCommentChars();
+            self.cur_buffer.setCommentChars();
             const buf = try self.cur_buffer.rowsToString();
             defer self.allocator.free(buf);
             const file = try std.fs.cwd().createFile(fname, .{ .truncate = true });
@@ -399,13 +389,13 @@ pub const Editor = struct {
                         const c3 = oldreader.readByte() catch return '\x1b';
                         if (c3 == '~') {
                             switch (c2) {
-                                '1' => return KEY_HOME,
-                                '3' => return KEY_DEL,
-                                '4' => return KEY_END,
-                                '5' => return KEY_PGUP,
-                                '6' => return KEY_PGDOWN,
-                                '7' => return KEY_HOME,
-                                '8' => return KEY_END,
+                                '1' => return kb.KEY_HOME,
+                                '3' => return kb.KEY_DEL,
+                                '4' => return kb.KEY_END,
+                                '5' => return kb.KEY_PGUP,
+                                '6' => return kb.KEY_PGDOWN,
+                                '7' => return kb.KEY_HOME,
+                                '8' => return kb.KEY_END,
                                 else => {
                                     std.debug.print("Only 5 or 6 are possible.", .{});
                                 },
@@ -416,18 +406,18 @@ pub const Editor = struct {
                             _ = oldreader.readByte() catch return '\x1b';
                         }
                     },
-                    'A' => return KEY_UP,
-                    'B' => return KEY_DOWN,
-                    'C' => return KEY_RIGHT,
-                    'D' => return KEY_LEFT,
-                    'H' => return KEY_HOME,
-                    'F' => return KEY_END,
+                    'A' => return kb.KEY_UP,
+                    'B' => return kb.KEY_DOWN,
+                    'C' => return kb.KEY_RIGHT,
+                    'D' => return kb.KEY_LEFT,
+                    'H' => return kb.KEY_HOME,
+                    'F' => return kb.KEY_END,
                     else => {},
                 }
             } else if (c1 == 'O') {
                 switch (c1) {
-                    'H' => return KEY_HOME,
-                    'F' => return KEY_END,
+                    'H' => return kb.KEY_HOME,
+                    'F' => return kb.KEY_END,
                     else => {},
                 }
             }
@@ -437,6 +427,15 @@ pub const Editor = struct {
         }
     }
 
+    fn setStatusMessage(self: *Editor, msg: []const u8) !void {
+        // There is some formatting magic in the tutorial version of this.
+        // Would probably be nicer not to format string before every message, but it also
+        // simpler to some extent.
+        self.allocator.free(self.statusmsg);
+        self.statusmsg = try self.allocator.dupe(u8, msg);
+        self.statusmsg_time = std.time.timestamp();
+    }
+
     fn quit(self: *Editor) !bool {
         if (self.cur_buffer.dirty > 0 and self.cur_buffer.confirm_to_quit) {
             self.cur_buffer.confirm_to_quit = false;
@@ -444,203 +443,5 @@ pub const Editor = struct {
             return true;
         }
         return false;
-    }
-
-    fn commentLine(self: *Editor) !void {
-        var to_comment = true;
-        if (self.cur_buffer.rows.items[self.cur_buffer.cy].content.len >= self.cur_buffer.comment_chars.len) {
-            to_comment = !std.mem.startsWith(u8, self.cur_buffer.rows.items[self.cur_buffer.cy].content, self.cur_buffer.comment_chars);
-        }
-        for (self.cur_buffer.comment_chars, 0..) |cs, i| {
-            if (to_comment) {
-                try self.cur_buffer.rows.items[self.cur_buffer.cy].insertChar(cs, i);
-                self.cur_buffer.cx += 1;
-            } else {
-                try self.cur_buffer.rows.items[self.cur_buffer.cy].delChar(0);
-                if (self.cur_buffer.cx > 0) {
-                    self.cur_buffer.cx -= 1;
-                }
-            }
-        }
-        try self.cur_buffer.rows.items[self.cur_buffer.cy].update();
-        self.cur_buffer.dirty += 1;
-    }
-
-    fn scroll(self: *Editor) void {
-        self.cur_buffer.rx = 0;
-        if (self.cur_buffer.cy < self.cur_buffer.rows.items.len) {
-            self.cur_buffer.rx = self.cur_buffer.rows.items[self.cur_buffer.cy].cxToRx(self.cur_buffer.cx);
-        }
-
-        if (self.cur_buffer.cy < self.cur_buffer.rowoffset) {
-            self.cur_buffer.rowoffset = self.cur_buffer.cy;
-        }
-        if (self.cur_buffer.cy >= self.cur_buffer.rowoffset + self.cur_buffer.screenrows) {
-            self.cur_buffer.rowoffset = self.cur_buffer.cy - self.cur_buffer.screenrows + 1;
-        }
-        if (self.cur_buffer.rx < self.cur_buffer.coloffset) {
-            self.cur_buffer.coloffset = self.cur_buffer.rx;
-        }
-        if (self.cur_buffer.rx >= self.cur_buffer.coloffset + self.cur_buffer.screencols) {
-            self.cur_buffer.coloffset = self.cur_buffer.rx - self.cur_buffer.screencols + 1;
-        }
-    }
-    fn drawRows(self: *Editor, str_buffer: *str.String) !void {
-        for (0..self.cur_buffer.screenrows) |crow| {
-            const filerow = self.cur_buffer.rowoffset + crow;
-            // Erase in line, by default, erases everything to the right of cursor.
-            if (filerow >= self.cur_buffer.rows.items.len) {
-                if (self.cur_buffer.rows.items.len == 0 and crow == self.cur_buffer.screenrows / 3) {
-                    if (self.cur_buffer.screencols - welcome_msg.len >= 0) {
-                        const padding = (self.cur_buffer.screencols - welcome_msg.len) / 2;
-                        if (padding > 0) {
-                            try str_buffer.append("~");
-                        }
-                        for (0..padding - 1) |_| {
-                            try str_buffer.append(" ");
-                        }
-                        try str_buffer.append(welcome_msg);
-                    }
-                } else {
-                    try str_buffer.append("~");
-                }
-            } else {
-                const offset_row = self.cur_buffer.rows.items[filerow].render;
-                if (offset_row.len >= self.cur_buffer.coloffset) {
-                    var maxlen = offset_row.len - self.cur_buffer.coloffset;
-                    if (maxlen > self.cur_buffer.screencols) {
-                        maxlen = self.cur_buffer.screencols;
-                    }
-                    try str_buffer.append(offset_row[self.cur_buffer.coloffset .. self.cur_buffer.coloffset + maxlen]);
-                }
-            }
-            try str_buffer.append("\x1b[K");
-            try str_buffer.append("\r\n");
-        }
-    }
-
-    fn drawMessageBar(self: *Editor, str_buffer: *str.String) !void {
-        try str_buffer.append("\x1b[K");
-        var msg = self.statusmsg;
-        if (self.statusmsg.len > self.screencols) {
-            msg = self.statusmsg[0..self.cur_buffer.screencols];
-        }
-        if (self.statusmsg.len > 0 and std.time.timestamp() - self.statusmsg_time < config.STATUS_MSG_DURATION_SEC) {
-            try str_buffer.append(self.statusmsg);
-        }
-    }
-
-    fn moveCursor(self: *Editor, key: u16) void {
-        switch (key) {
-            KEY_LEFT => {
-                if (self.cur_buffer.cx > 0) {
-                    self.cur_buffer.cx -= 1;
-                }
-            },
-            KEY_DOWN => {
-                if (self.cur_buffer.cy < self.cur_buffer.rows.items.len) {
-                    self.cur_buffer.cy += 1;
-                }
-            },
-            KEY_UP => {
-                if (self.cur_buffer.cy > 0) {
-                    self.cur_buffer.cy -= 1;
-                }
-            },
-            KEY_RIGHT => {
-                if (self.cur_buffer.cy < self.cur_buffer.rows.items.len) {
-                    if (self.cur_buffer.cx < self.cur_buffer.rows.items[self.cur_buffer.cy].content.len) {
-                        self.cur_buffer.cx += 1;
-                    }
-                }
-            },
-            else => return,
-        }
-        const rowlen = if (self.cur_buffer.cy < self.cur_buffer.rows.items.len) self.cur_buffer.rows.items[self.cur_buffer.cy].content.len else 0;
-        if (self.cur_buffer.cx > rowlen) {
-            self.cur_buffer.cx = rowlen;
-        }
-    }
-
-    fn setCommentChars(self: *Editor) void {
-        const fname = self.cur_buffer.filename orelse return;
-        if (std.mem.endsWith(u8, fname, ".py")) {
-            self.cur_buffer.comment_chars = "#";
-        }
-    }
-
-    fn insertRow(self: *Editor, at: usize, line: []u8) !void {
-        if (at > self.cur_buffer.rows.items.len) {
-            return;
-        }
-        try self.cur_buffer.rows.insert(at, try row.Row.init(line, self.cur_buffer.allocator));
-
-        try self.cur_buffer.rows.items[at].update();
-        self.cur_buffer.dirty += 1;
-    }
-
-    fn insertChar(self: *Editor, c: u8) !void {
-        if (self.cur_buffer.cy == self.cur_buffer.rows.items.len) {
-            try self.insertRow(self.cur_buffer.cy, "");
-        }
-        try self.cur_buffer.rows.items[self.cur_buffer.cy].insertChar(c, self.cur_buffer.cx);
-        self.cur_buffer.cx += 1;
-    }
-
-    fn setStatusMessage(self: *Editor, msg: []const u8) !void {
-        // There is some formatting magic in the tutorial version of this.
-        // Would probably be nicer not to format string before every message, but it also
-        // simpler to some extent.
-        self.cur_buffer.allocator.free(self.statusmsg);
-        self.statusmsg = try self.cur_buffer.allocator.dupe(u8, msg);
-        self.statusmsg_time = std.time.timestamp();
-    }
-
-    fn delCharToLeft(self: *Editor) !void {
-        if (self.cur_buffer.cy == self.cur_buffer.rows.items.len) {
-            return;
-        }
-        if (self.cur_buffer.cx == 0 and self.cur_buffer.cy == 0) {
-            return;
-        }
-        // How can it be smaller than zero?
-        var crow = self.cur_buffer.rows.items[self.cur_buffer.cy];
-        if (self.cur_buffer.cx > 0) {
-            try crow.delChar(self.cur_buffer.cx - 1);
-            self.cur_buffer.cx -= 1;
-        } else {
-            // Move cursor to the joint of two new rows.
-            var prev_row = self.cur_buffer.rows.items[self.cur_buffer.cy - 1];
-            self.cur_buffer.cx = prev_row.content.len;
-            // Join the two rows.
-            try prev_row.append(self.cur_buffer.rows.items[self.cur_buffer.cy].content);
-            self.delRow(self.cur_buffer.cy); // Remove the current row
-            self.cur_buffer.cy -= 1; // Move cursor up.
-        }
-        try crow.update();
-        self.cur_buffer.dirty += 1;
-    }
-
-    fn delRow(self: *Editor, at: usize) void {
-        if (at >= self.cur_buffer.rows.items.len) {
-            return;
-        }
-        const crow = self.cur_buffer.rows.orderedRemove(at);
-        crow.deinit();
-        self.cur_buffer.dirty += 1;
-    }
-
-    fn insertNewLine(self: *Editor) !void {
-        if (self.cur_buffer.cx == 0) {
-            try self.insertRow(self.cur_buffer.cy, "");
-        } else {
-            var crow = self.cur_buffer.rows.items[self.cur_buffer.cy];
-            try self.insertRow(self.cur_buffer.cy + 1, crow.content[self.cur_buffer.cx..]);
-            crow.content = crow.content[0..self.cur_buffer.cx];
-            try crow.update();
-        }
-        self.cur_buffer.cy += 1;
-        self.cur_buffer.cx = 0;
-        self.cur_buffer.dirty += 1;
     }
 };

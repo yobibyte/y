@@ -1,6 +1,19 @@
 const std = @import("std");
 const row = @import("row.zig");
 const main = @import("main.zig");
+const config = @import("config.zig");
+const str = @import("string.zig");
+const kb = @import("kb.zig");
+
+const zon: struct {
+    name: enum { y },
+    version: []const u8,
+    fingerprint: u64,
+    minimum_zig_version: []const u8,
+    paths: []const []const u8,
+} = @import("zon_mod");
+
+const welcome_msg = "yobibyte's text editor, version " ++ zon.version ++ ".";
 
 pub const Buffer = struct {
     allocator: std.mem.Allocator,
@@ -67,5 +80,183 @@ pub const Buffer = struct {
             self.allocator.free(fname);
         }
         self.allocator.destroy(self);
+    }
+
+    pub fn insertRow(self: *Buffer, at: usize, line: []u8) !void {
+        if (at > self.rows.items.len) {
+            return;
+        }
+        try self.rows.insert(at, try row.Row.init(line, self.allocator));
+
+        try self.rows.items[at].update();
+        self.dirty += 1;
+    }
+
+    pub fn delRow(self: *Buffer, at: usize) void {
+        if (at >= self.rows.items.len) {
+            return;
+        }
+        const crow = self.rows.orderedRemove(at);
+        crow.deinit();
+        self.dirty += 1;
+    }
+
+    pub fn commentLine(self: *Buffer) !void {
+        var to_comment = true;
+        if (self.rows.items[self.cy].content.len >= self.comment_chars.len) {
+            to_comment = !std.mem.startsWith(u8, self.rows.items[self.cy].content, self.comment_chars);
+        }
+        for (self.comment_chars, 0..) |cs, i| {
+            if (to_comment) {
+                try self.rows.items[self.cy].insertChar(cs, i);
+                self.cx += 1;
+            } else {
+                try self.rows.items[self.cy].delChar(0);
+                if (self.cx > 0) {
+                    self.cx -= 1;
+                }
+            }
+        }
+        try self.rows.items[self.cy].update();
+        self.dirty += 1;
+    }
+
+    pub fn scroll(self: *Buffer) void {
+        self.rx = 0;
+        if (self.cy < self.rows.items.len) {
+            self.rx = self.rows.items[self.cy].cxToRx(self.cx);
+        }
+
+        if (self.cy < self.rowoffset) {
+            self.rowoffset = self.cy;
+        }
+        if (self.cy >= self.rowoffset + self.screenrows) {
+            self.rowoffset = self.cy - self.screenrows + 1;
+        }
+        if (self.rx < self.coloffset) {
+            self.coloffset = self.rx;
+        }
+        if (self.rx >= self.coloffset + self.screencols) {
+            self.coloffset = self.rx - self.screencols + 1;
+        }
+    }
+    pub fn drawRows(self: *Buffer, str_buffer: *str.String) !void {
+        for (0..self.screenrows) |crow| {
+            const filerow = self.rowoffset + crow;
+            // Erase in line, by default, erases everything to the right of cursor.
+            if (filerow >= self.rows.items.len) {
+                if (self.rows.items.len == 0 and crow == self.screenrows / 3) {
+                    if (self.screencols - welcome_msg.len >= 0) {
+                        const padding = (self.screencols - welcome_msg.len) / 2;
+                        if (padding > 0) {
+                            try str_buffer.append("~");
+                        }
+                        for (0..padding - 1) |_| {
+                            try str_buffer.append(" ");
+                        }
+                        try str_buffer.append(welcome_msg);
+                    }
+                } else {
+                    try str_buffer.append("~");
+                }
+            } else {
+                const offset_row = self.rows.items[filerow].render;
+                if (offset_row.len >= self.coloffset) {
+                    var maxlen = offset_row.len - self.coloffset;
+                    if (maxlen > self.screencols) {
+                        maxlen = self.screencols;
+                    }
+                    try str_buffer.append(offset_row[self.coloffset .. self.coloffset + maxlen]);
+                }
+            }
+            try str_buffer.append("\x1b[K");
+            try str_buffer.append("\r\n");
+        }
+    }
+
+    pub fn moveCursor(self: *Buffer, key: u16) void {
+        switch (key) {
+            kb.KEY_LEFT => {
+                if (self.cx > 0) {
+                    self.cx -= 1;
+                }
+            },
+            kb.KEY_DOWN => {
+                if (self.cy < self.rows.items.len) {
+                    self.cy += 1;
+                }
+            },
+            kb.KEY_UP => {
+                if (self.cy > 0) {
+                    self.cy -= 1;
+                }
+            },
+            kb.KEY_RIGHT => {
+                if (self.cy < self.rows.items.len) {
+                    if (self.cx < self.rows.items[self.cy].content.len) {
+                        self.cx += 1;
+                    }
+                }
+            },
+            else => return,
+        }
+        const rowlen = if (self.cy < self.rows.items.len) self.rows.items[self.cy].content.len else 0;
+        if (self.cx > rowlen) {
+            self.cx = rowlen;
+        }
+    }
+
+    pub fn setCommentChars(self: *Buffer) void {
+        const fname = self.filename orelse return;
+        if (std.mem.endsWith(u8, fname, ".py")) {
+            self.comment_chars = "#";
+        }
+    }
+
+    pub fn insertChar(self: *Buffer, c: u8) !void {
+        if (self.cy == self.rows.items.len) {
+            try self.insertRow(self.cy, "");
+        }
+        try self.rows.items[self.cy].insertChar(c, self.cx);
+        self.cx += 1;
+    }
+
+    pub fn delCharToLeft(self: *Buffer) !void {
+        if (self.cy == self.rows.items.len) {
+            return;
+        }
+        if (self.cx == 0 and self.cy == 0) {
+            return;
+        }
+        // How can it be smaller than zero?
+        var crow = self.rows.items[self.cy];
+        if (self.cx > 0) {
+            try crow.delChar(self.cx - 1);
+            self.cx -= 1;
+        } else {
+            // Move cursor to the joint of two new rows.
+            var prev_row = self.rows.items[self.cy - 1];
+            self.cx = prev_row.content.len;
+            // Join the two rows.
+            try prev_row.append(self.rows.items[self.cy].content);
+            self.delRow(self.cy); // Remove the current row
+            self.cy -= 1; // Move cursor up.
+        }
+        try crow.update();
+        self.dirty += 1;
+    }
+
+    pub fn insertNewLine(self: *Buffer) !void {
+        if (self.cx == 0) {
+            try self.insertRow(self.cy, "");
+        } else {
+            var crow = self.rows.items[self.cy];
+            try self.insertRow(self.cy + 1, crow.content[self.cx..]);
+            crow.content = crow.content[0..self.cx];
+            try crow.update();
+        }
+        self.cy += 1;
+        self.cx = 0;
+        self.dirty += 1;
     }
 };
