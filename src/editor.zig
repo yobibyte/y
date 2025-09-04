@@ -2,6 +2,7 @@ const std = @import("std");
 const main = @import("main.zig");
 const str = @import("string.zig");
 const row = @import("row.zig");
+const buffer = @import("buffer.zig");
 const config = @import("config.zig");
 const posix = std.posix;
 
@@ -47,7 +48,7 @@ pub const Editor = struct {
     handle: std.posix.fd_t,
     reader: std.fs.File.Reader,
     stdin_buffer: [1024]u8,
-    state: *main.Buffer,
+    state: *buffer.Buffer,
     mode: Mode,
     orig_term: posix.system.termios,
 

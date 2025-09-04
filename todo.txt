@@ -1,7 +1,7 @@
 ---------
 There is something wrong with the boundary check on the bottom most row. Sometimes, I cannot move to the new row, sometimes, I get move one row past it.
 ---------
-Incapsulate editor behaviour, move state to the new Editor struct.
+Split state into 2 parts: editor-related stuff, and a buffer-related stuff. Get ready for a list of buffers.
 ---------
 Right now, if I add a char and remove it immediately, this will not reset the dirty.
 // How do we address those?
