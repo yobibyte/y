@@ -1,7 +1,6 @@
 const std = @import("std");
 const row = @import("row.zig");
 const main = @import("main.zig");
-const term = @import("term.zig");
 
 pub const Buffer = struct {
     allocator: std.mem.Allocator,
@@ -14,14 +13,10 @@ pub const Buffer = struct {
     rowoffset: usize,
     coloffset: usize,
     filename: ?[]const u8,
-    statusmsg: []const u8,
-    statusmsg_time: i64,
     // Can do with a bool now, but probably will be useful for tracking undo.
     // Probably, with the undo file, we can make it signed, but I will change it later.
     dirty: u64,
     confirm_to_quit: bool, // if set, quit without confirmation, reset when pressed Ctrl+Q once.
-    stdout: *const std.fs.File,
-    reader: *std.fs.File.Reader,
     comment_chars: []const u8,
 
     pub fn rowsToString(self: *Buffer) ![]u8 {
@@ -45,7 +40,7 @@ pub const Buffer = struct {
         return buf;
     }
 
-    pub fn reset(self: *Buffer, writer: *const std.fs.File, reader: *std.fs.File.Reader, allocator: std.mem.Allocator) !void {
+    pub fn reset(self: *Buffer, allocator: std.mem.Allocator, screenrows: usize, screencols: usize) !void {
         self.allocator = allocator;
         self.cx = 0;
         self.rx = 0;
@@ -53,17 +48,12 @@ pub const Buffer = struct {
         self.rows = std.array_list.Managed(*row.Row).init(allocator);
         self.rowoffset = 0;
         self.coloffset = 0;
-        const ws = try term.getWindowSize(writer);
-        self.screenrows = ws[0] - 2;
-        self.screencols = ws[1];
         self.filename = null;
-        self.statusmsg = "";
-        self.statusmsg_time = 0;
         self.dirty = 0;
         self.confirm_to_quit = true;
-        self.stdout = writer;
-        self.reader = reader;
         self.comment_chars = "//";
+        self.screenrows = screenrows;
+        self.screencols = screencols;
     }
 
     pub fn deinit(self: *Buffer) void {
@@ -74,6 +64,5 @@ pub const Buffer = struct {
         if (self.filename) |fname| {
             self.allocator.free(fname);
         }
-        main.state.allocator.free(main.state.statusmsg);
     }
 };

@@ -87,13 +87,13 @@ pub const Row = struct {
         main.state.dirty += 1;
     }
 
-    pub fn delChar(self: *Row, at: usize) void {
+    pub fn delChar(self: *Row, at: usize) !void {
         const rowlen = self.content.len;
         if (at >= rowlen) {
             return;
         }
         std.mem.copyForwards(u8, self.content[at..], self.content[at + 1 .. rowlen]);
-        self.content = self.content[0 .. rowlen - 1];
+        self.content = try self.allocator.realloc(self.content, rowlen - 1);
     }
 
     pub fn append(self: *Row, chunk: []u8) !void {

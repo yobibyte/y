@@ -4,6 +4,7 @@ const str = @import("string.zig");
 const row = @import("row.zig");
 const buffer = @import("buffer.zig");
 const config = @import("config.zig");
+const term = @import("term.zig");
 const posix = std.posix;
 
 // In the original tutorial, this is a enum.
@@ -51,6 +52,10 @@ pub const Editor = struct {
     state: *buffer.Buffer,
     mode: Mode,
     orig_term: posix.system.termios,
+    screenrows: usize,
+    screencols: usize,
+    statusmsg: []const u8,
+    statusmsg_time: i64,
 
     pub fn init(allocator: std.mem.Allocator) !*Editor {
         var self = try allocator.create(Editor);
@@ -62,34 +67,40 @@ pub const Editor = struct {
         self.reader = self.stdin.reader(&self.stdin_buffer);
         self.handle = self.stdin.handle;
 
+        const ws = try term.getWindowSize(&self.stdout);
+        self.screenrows = ws[0] - 2;
+        self.screencols = ws[1];
+
         // This is temporal. I will split the state into two parts:
         // Some of the editor-level vars will move to just Editor fields.
         // The rest, like Rows, will become buffers, and editor will keep a list (or a map) of buffers.
         self.state = &main.state;
         self.mode = Mode.normal;
+        self.statusmsg = "";
+        self.statusmsg_time = 0;
 
         try self.enableRawMode(self.handle);
-        try self.state.reset(&self.stdout, &self.reader, self.allocator);
+        try self.state.reset(self.allocator, self.screenrows, self.screencols);
         return self;
     }
 
     fn enableRawMode(self: *Editor, handle: posix.fd_t) !void {
         self.orig_term = try posix.tcgetattr(handle);
-        var term = self.orig_term;
-        term.lflag.ECHO = !term.lflag.ECHO;
-        term.lflag.ISIG = !term.lflag.ISIG;
-        term.lflag.ICANON = !term.lflag.ICANON;
-        term.lflag.IEXTEN = !term.lflag.IEXTEN;
-        term.iflag.IXON = !term.iflag.IXON;
-        term.iflag.ICRNL = !term.iflag.ICRNL;
-        term.iflag.BRKINT = !term.iflag.BRKINT;
-        term.iflag.INPCK = !term.iflag.INPCK;
-        term.iflag.ISTRIP = !term.iflag.ISTRIP;
-        term.oflag.OPOST = !term.oflag.OPOST;
-        term.cflag.CSIZE = posix.CSIZE.CS8;
-        term.cc[@intFromEnum(posix.V.MIN)] = 0;
-        term.cc[@intFromEnum(posix.V.TIME)] = 1;
-        try posix.tcsetattr(handle, .NOW, term);
+        var cterm = self.orig_term;
+        cterm.lflag.ECHO = !cterm.lflag.ECHO;
+        cterm.lflag.ISIG = !cterm.lflag.ISIG;
+        cterm.lflag.ICANON = !cterm.lflag.ICANON;
+        cterm.lflag.IEXTEN = !cterm.lflag.IEXTEN;
+        cterm.iflag.IXON = !cterm.iflag.IXON;
+        cterm.iflag.ICRNL = !cterm.iflag.ICRNL;
+        cterm.iflag.BRKINT = !cterm.iflag.BRKINT;
+        cterm.iflag.INPCK = !cterm.iflag.INPCK;
+        cterm.iflag.ISTRIP = !cterm.iflag.ISTRIP;
+        cterm.oflag.OPOST = !cterm.oflag.OPOST;
+        cterm.cflag.CSIZE = posix.CSIZE.CS8;
+        cterm.cc[@intFromEnum(posix.V.MIN)] = 0;
+        cterm.cc[@intFromEnum(posix.V.TIME)] = 1;
+        try posix.tcsetattr(handle, .NOW, cterm);
     }
 
     pub fn disableRawMode(self: *Editor, handle: posix.fd_t, writer: *const std.fs.File) !void {
@@ -103,6 +114,7 @@ pub const Editor = struct {
             std.debug.print("Failed to restore the original terminal mode: {}", .{err});
         };
         self.state.deinit();
+        self.allocator.free(self.statusmsg);
         self.allocator.destroy(self);
     }
 
@@ -291,7 +303,7 @@ pub const Editor = struct {
         try str_buf.append(escape_code);
 
         try str_buf.append("\x1b[?25h");
-        try self.state.stdout.writeAll(str_buf.content());
+        try self.stdout.writeAll(str_buf.content());
     }
 
     fn get_prompt(self: *Editor, prompt: []const u8) !?[]u8 {
@@ -372,7 +384,7 @@ pub const Editor = struct {
     }
 
     pub fn readKey(self: *Editor) !u16 {
-        var oldreader = self.state.reader.interface.adaptToOldInterface();
+        var oldreader = self.reader.interface.adaptToOldInterface();
         const c = oldreader.readByte() catch |err| switch (err) {
             error.EndOfStream => return 0,
             else => return err,
@@ -444,7 +456,7 @@ pub const Editor = struct {
                 try self.state.rows.items[self.state.cy].insertChar(cs, i);
                 self.state.cx += 1;
             } else {
-                self.state.rows.items[self.state.cy].delChar(0);
+                try self.state.rows.items[self.state.cy].delChar(0);
                 if (self.state.cx > 0) {
                     self.state.cx -= 1;
                 }
@@ -509,12 +521,12 @@ pub const Editor = struct {
 
     fn drawMessageBar(self: *Editor, str_buffer: *str.String) !void {
         try str_buffer.append("\x1b[K");
-        var msg = self.state.statusmsg;
-        if (self.state.statusmsg.len > self.state.screencols) {
-            msg = self.state.statusmsg[0..self.state.screencols];
+        var msg = self.statusmsg;
+        if (self.statusmsg.len > self.screencols) {
+            msg = self.statusmsg[0..self.state.screencols];
         }
-        if (self.state.statusmsg.len > 0 and std.time.timestamp() - self.state.statusmsg_time < config.STATUS_MSG_DURATION_SEC) {
-            try str_buffer.append(self.state.statusmsg);
+        if (self.statusmsg.len > 0 and std.time.timestamp() - self.statusmsg_time < config.STATUS_MSG_DURATION_SEC) {
+            try str_buffer.append(self.statusmsg);
         }
     }
 
@@ -579,9 +591,9 @@ pub const Editor = struct {
         // There is some formatting magic in the tutorial version of this.
         // Would probably be nicer not to format string before every message, but it also
         // simpler to some extent.
-        self.state.allocator.free(self.state.statusmsg);
-        self.state.statusmsg = try self.state.allocator.dupe(u8, msg);
-        self.state.statusmsg_time = std.time.timestamp();
+        self.state.allocator.free(self.statusmsg);
+        self.statusmsg = try self.state.allocator.dupe(u8, msg);
+        self.statusmsg_time = std.time.timestamp();
     }
 
     fn delCharToLeft(self: *Editor) !void {
@@ -594,7 +606,7 @@ pub const Editor = struct {
         // How can it be smaller than zero?
         var crow = self.state.rows.items[self.state.cy];
         if (self.state.cx > 0) {
-            crow.delChar(self.state.cx - 1);
+            try crow.delChar(self.state.cx - 1);
             self.state.cx -= 1;
         } else {
             // Move cursor to the joint of two new rows.
