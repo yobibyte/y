@@ -1,6 +1,10 @@
 ---------
 Implement rudimentary search from https://viewsourcecode.org/snaptoken/kilo/06.search.html
 ---------
+Add the command stack: e.g. in the command mode if the key is not a part of known flow (e.g. w move by word), add those to a stack until we match some command or press esc. I should probably limit this by some amount of chars.
+Display this stack on the status bar. Vim adds it to the message bar, but who cares.
+Eventually, I'll probably merge status and message bars and remove color inversion.
+---------
 There is something wrong with the boundary check on the bottom most row. Sometimes, I cannot move to the new row, sometimes, I get move one row past it.
 ---------
 Right now, if I add a char and remove it immediately, this will not reset the dirty.
