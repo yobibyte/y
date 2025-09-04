@@ -84,7 +84,6 @@ pub const Row = struct {
         self.content = new_content;
 
         try self.update();
-        main.state.dirty += 1;
     }
 
     pub fn delChar(self: *Row, at: usize) !void {
@@ -103,9 +102,7 @@ pub const Row = struct {
         // TODO: be careful when using gpa.
         self.allocator.free(self.content);
         self.content = new_content;
-
         try self.update();
-        main.state.dirty += 1;
     }
 
     pub fn deinit(self: *Row) void {

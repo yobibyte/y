@@ -36,8 +36,6 @@ const std = @import("std");
 const editor = @import("editor.zig");
 const buffer = @import("buffer.zig");
 
-pub var state: buffer.Buffer = undefined;
-
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer switch (gpa.deinit()) {

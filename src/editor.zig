@@ -74,13 +74,13 @@ pub const Editor = struct {
         // This is temporal. I will split the state into two parts:
         // Some of the editor-level vars will move to just Editor fields.
         // The rest, like Rows, will become buffers, and editor will keep a list (or a map) of buffers.
-        self.state = &main.state;
+        self.state = undefined;
         self.mode = Mode.normal;
         self.statusmsg = "";
         self.statusmsg_time = 0;
 
         try self.enableRawMode(self.handle);
-        try self.state.reset(self.allocator, self.screenrows, self.screencols);
+        self.state = try buffer.Buffer.init(self.allocator, self.screenrows, self.screencols);
         return self;
     }
 

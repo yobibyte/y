@@ -25,7 +25,7 @@ pub const Buffer = struct {
             // 1 for the newline symbol.
             total_len += crow.content.len + 1;
         }
-        const buf = try main.state.allocator.alloc(u8, total_len);
+        const buf = try self.allocator.alloc(u8, total_len);
         var bytes_written: usize = 0;
         for (self.rows.items) |crow| {
             // stdlib docs say this function is deprecated.
@@ -40,7 +40,8 @@ pub const Buffer = struct {
         return buf;
     }
 
-    pub fn reset(self: *Buffer, allocator: std.mem.Allocator, screenrows: usize, screencols: usize) !void {
+    pub fn init(allocator: std.mem.Allocator, screenrows: usize, screencols: usize) !*Buffer {
+        var self = try allocator.create(Buffer);
         self.allocator = allocator;
         self.cx = 0;
         self.rx = 0;
@@ -54,6 +55,7 @@ pub const Buffer = struct {
         self.comment_chars = "//";
         self.screenrows = screenrows;
         self.screencols = screencols;
+        return self;
     }
 
     pub fn deinit(self: *Buffer) void {
@@ -64,5 +66,6 @@ pub const Buffer = struct {
         if (self.filename) |fname| {
             self.allocator.free(fname);
         }
+        self.allocator.destroy(self);
     }
 };
