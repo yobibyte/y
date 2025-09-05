@@ -58,6 +58,21 @@ pub const Row = struct {
 
         return rx;
     }
+    pub fn rxToCx(self: *Row, rx: usize) usize {
+        var cur_rx: usize = 0;
+
+        for (self.render, 0..self.content.len) |c, cx| {
+            if (c == '\t') {
+                cur_rx += (config.TAB_WIDTH - 1) - (cur_rx % config.TAB_WIDTH);
+            }
+            cur_rx += 1;
+            if (cur_rx > rx) {
+                return cx;
+            }
+        }
+
+        return self.content.len;
+    }
 
     pub fn insertChar(self: *Row, c: u8, at: usize) !void {
         // I am not sure why the original tutorial used an int here.

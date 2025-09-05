@@ -139,6 +139,7 @@ pub const Editor = struct {
             'l' => self.moveCursor(kb.KEY_RIGHT),
             'i' => self.mode = Mode.insert,
             's' => try self.save(),
+            '/' => try self.find(),
             'q' => return self.quit(),
             'x', kb.KEY_DEL => {
                 if (state.cy < state.rows.items.len) {
@@ -315,6 +316,7 @@ pub const Editor = struct {
                 }
             } else if (c == '\x1b') {
                 try self.setStatusMessage("");
+                self.allocator.free(command_buf);
                 return null;
             } else if (c == '\r') {
                 if (command_buf_len != 0) {
@@ -434,6 +436,27 @@ pub const Editor = struct {
         self.allocator.free(self.statusmsg);
         self.statusmsg = try self.allocator.dupe(u8, msg);
         self.statusmsg_time = std.time.timestamp();
+    }
+
+    fn find(self: *Editor) !void {
+        const prompt = try self.get_prompt("Find: ");
+        if (prompt) |query| {
+            defer self.allocator.free(query);
+            // move to buffer
+            // TODO: What if we have multiple matches?
+            // We should prob cut the search from current row and col, not from all.
+            for (self.cur_buffer.rows.items, 0..) |crow, i| {
+                const maybe_match_idx = std.mem.indexOf(u8, crow.render, query);
+                if (maybe_match_idx) |match| {
+                    self.cur_buffer.cy = i;
+                    // rx -> cx
+                    self.cur_buffer.cx = crow.rxToCx(match);
+                    // TODO make a len() func for cur buf
+                    self.cur_buffer.rowoffset = self.cur_buffer.rows.items.len;
+                    break;
+                }
+            }
+        }
     }
 
     fn quit(self: *Editor) !bool {
