@@ -32,6 +32,10 @@ pub const Buffer = struct {
     confirm_to_quit: bool, // if set, quit without confirmation, reset when pressed Ctrl+Q once.
     comment_chars: []const u8,
 
+    pub fn len(self: *Buffer) usize {
+        return self.rows.items.len;
+    }
+
     pub fn rowsToString(self: *Buffer) ![]u8 {
         var total_len: usize = 0;
         for (self.rows.items) |crow| {
@@ -83,7 +87,7 @@ pub const Buffer = struct {
     }
 
     pub fn insertRow(self: *Buffer, at: usize, line: []u8) !void {
-        if (at > self.rows.items.len) {
+        if (at > self.len()) {
             return;
         }
         try self.rows.insert(at, try row.Row.init(line, self.allocator));
@@ -93,7 +97,7 @@ pub const Buffer = struct {
     }
 
     pub fn delRow(self: *Buffer, at: usize) void {
-        if (at >= self.rows.items.len) {
+        if (at >= self.len()) {
             return;
         }
         const crow = self.rows.orderedRemove(at);
@@ -123,7 +127,7 @@ pub const Buffer = struct {
 
     pub fn scroll(self: *Buffer) void {
         self.rx = 0;
-        if (self.cy < self.rows.items.len) {
+        if (self.cy < self.len()) {
             self.rx = self.rows.items[self.cy].cxToRx(self.cx);
         }
 
@@ -144,8 +148,8 @@ pub const Buffer = struct {
         for (0..self.screenrows) |crow| {
             const filerow = self.rowoffset + crow;
             // Erase in line, by default, erases everything to the right of cursor.
-            if (filerow >= self.rows.items.len) {
-                if (self.rows.items.len == 0 and crow == self.screenrows / 3) {
+            if (filerow >= self.len()) {
+                if (self.len() == 0 and crow == self.screenrows / 3) {
                     if (self.screencols - welcome_msg.len >= 0) {
                         const padding = (self.screencols - welcome_msg.len) / 2;
                         if (padding > 0) {
@@ -182,7 +186,7 @@ pub const Buffer = struct {
                 }
             },
             kb.KEY_DOWN => {
-                if (self.cy < self.rows.items.len) {
+                if (self.cy < self.len()) {
                     self.cy += 1;
                 }
             },
@@ -192,7 +196,7 @@ pub const Buffer = struct {
                 }
             },
             kb.KEY_RIGHT => {
-                if (self.cy < self.rows.items.len) {
+                if (self.cy < self.len()) {
                     if (self.cx < self.rows.items[self.cy].content.len) {
                         self.cx += 1;
                     }
@@ -200,7 +204,7 @@ pub const Buffer = struct {
             },
             else => return,
         }
-        const rowlen = if (self.cy < self.rows.items.len) self.rows.items[self.cy].content.len else 0;
+        const rowlen = if (self.cy < self.len()) self.rows.items[self.cy].content.len else 0;
         if (self.cx > rowlen) {
             self.cx = rowlen;
         }
@@ -214,7 +218,7 @@ pub const Buffer = struct {
     }
 
     pub fn insertChar(self: *Buffer, c: u8) !void {
-        if (self.cy == self.rows.items.len) {
+        if (self.cy == self.len()) {
             try self.insertRow(self.cy, "");
         }
         try self.rows.items[self.cy].insertChar(c, self.cx);
@@ -222,7 +226,7 @@ pub const Buffer = struct {
     }
 
     pub fn delCharToLeft(self: *Buffer) !void {
-        if (self.cy == self.rows.items.len) {
+        if (self.cy == self.len()) {
             return;
         }
         if (self.cx == 0 and self.cy == 0) {
@@ -258,5 +262,32 @@ pub const Buffer = struct {
         self.cy += 1;
         self.cx = 0;
         self.dirty += 1;
+    }
+
+    pub fn search(self: *Buffer, query: []const u8) !void {
+        const start_idx = self.cy;
+        var cur_idx = self.cy;
+        var search_start_x = @min(self.rx + 1, self.rows.items[cur_idx].render.len);
+        while (true) {
+            const crow = self.rows.items[cur_idx];
+            const maybe_match_idx = std.mem.indexOf(u8, crow.render[search_start_x..], query);
+            if (maybe_match_idx) |match| {
+                self.cy = cur_idx;
+                self.cx = crow.rxToCx(match) + search_start_x;
+                if (self.len() - cur_idx > self.screenrows) {
+                    self.rowoffset = self.len();
+                }
+                break;
+            }
+            search_start_x = 0;
+            if (cur_idx == self.len() - 1) {
+                cur_idx = 0;
+            } else {
+                cur_idx += 1;
+            }
+            if (cur_idx == start_idx) {
+                break;
+            }
+        }
     }
 };

@@ -31,6 +31,7 @@ pub const Editor = struct {
     screencols: usize,
     statusmsg: []const u8,
     statusmsg_time: i64,
+    search_pattern: ?[]const u8,
 
     pub fn init(allocator: std.mem.Allocator) !*Editor {
         var self = try allocator.create(Editor);
@@ -53,6 +54,8 @@ pub const Editor = struct {
         self.mode = Mode.normal;
         self.statusmsg = "";
         self.statusmsg_time = 0;
+
+        self.search_pattern = null;
 
         try self.enableRawMode(self.handle);
         self.cur_buffer = try buffer.Buffer.init(self.allocator, self.screenrows, self.screencols);
@@ -90,6 +93,9 @@ pub const Editor = struct {
         };
         self.cur_buffer.deinit();
         self.allocator.free(self.statusmsg);
+        if (self.search_pattern) |sp| {
+            self.allocator.free(sp);
+        }
         self.allocator.destroy(self);
     }
 
@@ -108,7 +114,7 @@ pub const Editor = struct {
                     else => return err,
                 }
             };
-            try self.cur_buffer.insertRow(self.cur_buffer.rows.items.len, line);
+            try self.cur_buffer.insertRow(self.cur_buffer.len(), line);
         }
         self.cur_buffer.filename = try self.allocator.dupe(u8, fname);
         self.cur_buffer.setCommentChars();
@@ -139,17 +145,18 @@ pub const Editor = struct {
             'l' => self.moveCursor(kb.KEY_RIGHT),
             'i' => self.mode = Mode.insert,
             's' => try self.save(),
-            '/' => try self.find(),
+            '/' => try self.search(true),
+            'n' => try self.search(false),
             'q' => return self.quit(),
             'x', kb.KEY_DEL => {
-                if (state.cy < state.rows.items.len) {
+                if (state.cy < state.len()) {
                     if (state.cx < state.rows.items[state.cy].content.len) {
                         self.moveCursor(kb.KEY_RIGHT);
                     }
                     try self.cur_buffer.delCharToLeft();
                 }
             },
-            'G' => state.cy = state.rows.items.len - 1,
+            'G' => state.cy = state.len() - 1,
             // Example of using a command prompt.
             kb.KEY_PROMPT => {
                 const maybe_cmd = try self.get_prompt(":");
@@ -159,7 +166,7 @@ pub const Editor = struct {
                         try self.cur_buffer.commentLine();
                     } else {
                         const number = std.fmt.parseInt(usize, cmd, 10) catch 0;
-                        if (number > 0 and number <= state.rows.items.len) {
+                        if (number > 0 and number <= state.len()) {
                             state.cy = number - 1;
                         }
                     }
@@ -185,7 +192,7 @@ pub const Editor = struct {
             kb.KEY_BACKSPACE, kb.KEY_DEL, ctrlKey('h') => {
                 if (c == kb.KEY_DEL) {
                     // We should be joining the two rows in here in the insert mode.
-                    if (state.cy < state.rows.items.len) {
+                    if (state.cy < state.len()) {
                         if (state.cx == state.rows.items[state.cy].content.len) {
                             state.cx = 0;
                             self.moveCursor(kb.KEY_DOWN);
@@ -203,8 +210,8 @@ pub const Editor = struct {
                     state.cy = state.rowoffset;
                 } else {
                     state.cy = state.rowoffset + state.screenrows - 1;
-                    if (state.cy > state.rows.items.len) {
-                        state.cy = state.rows.items.len;
+                    if (state.cy > state.len()) {
+                        state.cy = state.len();
                     }
                 }
                 for (0..state.screenrows) |_| {
@@ -216,7 +223,7 @@ pub const Editor = struct {
                 state.cx = 0;
             },
             kb.KEY_END => {
-                if (state.cy < state.rows.items.len) {
+                if (state.cy < state.len()) {
                     state.cx = state.rows.items[state.cy].content.len;
                 }
             },
@@ -252,7 +259,7 @@ pub const Editor = struct {
 
         // Reserve space for lines.
         var lbuffer: [100]u8 = undefined;
-        const lines = try std.fmt.bufPrint(&lbuffer, " {s} {d}/{d}", .{ @tagName(self.mode), self.cur_buffer.cy + 1, self.cur_buffer.rows.items.len });
+        const lines = try std.fmt.bufPrint(&lbuffer, " {s} {d}/{d}", .{ @tagName(self.mode), self.cur_buffer.cy + 1, self.cur_buffer.len() });
 
         const mod_string = if (self.cur_buffer.dirty > 0) " (modified)" else "";
         const emptyspots = self.cur_buffer.screencols - lines.len - mod_string.len;
@@ -438,24 +445,19 @@ pub const Editor = struct {
         self.statusmsg_time = std.time.timestamp();
     }
 
-    fn find(self: *Editor) !void {
-        const prompt = try self.get_prompt("Find: ");
-        if (prompt) |query| {
-            defer self.allocator.free(query);
-            // move to buffer
-            // TODO: What if we have multiple matches?
-            // We should prob cut the search from current row and col, not from all.
-            for (self.cur_buffer.rows.items, 0..) |crow, i| {
-                const maybe_match_idx = std.mem.indexOf(u8, crow.render, query);
-                if (maybe_match_idx) |match| {
-                    self.cur_buffer.cy = i;
-                    // rx -> cx
-                    self.cur_buffer.cx = crow.rxToCx(match);
-                    // TODO make a len() func for cur buf
-                    self.cur_buffer.rowoffset = self.cur_buffer.rows.items.len;
-                    break;
+    fn search(self: *Editor, to_prompt: bool) !void {
+        if (to_prompt) {
+            const prompt = try self.get_prompt("Find: ");
+            if (prompt) |query| {
+                defer self.allocator.free(query);
+                if (self.search_pattern) |sp| {
+                    self.allocator.free(sp);
                 }
+                self.search_pattern = try self.allocator.dupe(u8, query);
             }
+        }
+        if (self.search_pattern) |sp| {
+            try self.cur_buffer.search(sp);
         }
     }
 

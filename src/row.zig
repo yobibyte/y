@@ -82,10 +82,7 @@ pub const Row = struct {
         if (at > oldsize) {
             actual_at = oldsize;
         }
-        // I didn'make reallocate work. Figure this out.
-        // Probably after switch to the gpa.
-        // self.content = self.allocator.reallocate(self.content, oldsize+1);
-
+        // TODO: use reallocate here?
         const new_content = try self.allocator.alloc(u8, oldsize + 1);
 
         if (actual_at > 0) {
@@ -114,7 +111,6 @@ pub const Row = struct {
         const new_content = try self.allocator.alloc(u8, self.content.len + chunk.len);
         std.mem.copyForwards(u8, new_content[0..self.content.len], self.content);
         std.mem.copyForwards(u8, new_content[self.content.len..], chunk);
-        // TODO: be careful when using gpa.
         self.allocator.free(self.content);
         self.content = new_content;
         try self.update();
