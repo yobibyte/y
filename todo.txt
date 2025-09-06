@@ -1,9 +1,7 @@
 ---------
-Add the command stack: e.g. in the command mode if the key is not a part of known flow (e.g. w move by word), add those to a stack until we match some command or press esc. I should probably limit this by some amount of chars.
-Display this stack on the status bar. Vim adds it to the message bar, but who cares.
-Eventually, I'll probably merge status and message bars and remove color inversion.
----------
 Implement forward/backward search.
+---------
+Show tabs as spaces, do not do weird up to TAB_WIDTH padding.
 ---------
 Return nullable from search so that we could show a status message that nothing is found.
 ---------
@@ -25,3 +23,5 @@ Fully switch to the new reader/writer API, do not use the oldreader
 ---------
 Figure out how to process multi-key commands with modifiers: e.g. 3w
 ---------
+
+

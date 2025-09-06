@@ -17,6 +17,42 @@ pub const Mode = enum {
     insert,
 };
 
+pub const CommandBuffer = struct {
+    allocator: std.mem.Allocator,
+    // TODO: can I make everything on the stack here?
+    data: []u8,
+    len: usize,
+
+    fn init(allocator: std.mem.Allocator) !*CommandBuffer {
+        var self = try allocator.create(CommandBuffer);
+        self.data = try allocator.alloc(u8, 20);
+        self.len = 0;
+        self.allocator = allocator;
+        return self;
+    }
+
+    fn deinit(self: *CommandBuffer) void {
+        self.allocator.free(self.data);
+        self.allocator.destroy(self);
+    }
+
+    fn clear(self: *CommandBuffer) void {
+        self.len = 0;
+    }
+
+    fn cmd(self: *CommandBuffer) []u8 {
+        return self.data[0..self.len];
+    }
+
+    fn append(self: *CommandBuffer, c: u8) void {
+        self.data[self.len] = c;
+        self.len += 1;
+        if (self.len >= 20) {
+            self.len = 0;
+        }
+    }
+};
+
 pub const Editor = struct {
     allocator: std.mem.Allocator,
     stdin: std.fs.File,
@@ -32,6 +68,7 @@ pub const Editor = struct {
     statusmsg: []const u8,
     statusmsg_time: i64,
     search_pattern: ?[]const u8,
+    cmd_buffer: *CommandBuffer,
 
     pub fn init(allocator: std.mem.Allocator) !*Editor {
         var self = try allocator.create(Editor);
@@ -59,6 +96,8 @@ pub const Editor = struct {
 
         try self.enableRawMode(self.handle);
         self.cur_buffer = try buffer.Buffer.init(self.allocator, self.screenrows, self.screencols);
+
+        self.cmd_buffer = try CommandBuffer.init(self.allocator);
         return self;
     }
 
@@ -96,6 +135,7 @@ pub const Editor = struct {
         if (self.search_pattern) |sp| {
             self.allocator.free(sp);
         }
+        self.cmd_buffer.deinit();
         self.allocator.destroy(self);
     }
 
@@ -137,8 +177,22 @@ pub const Editor = struct {
     fn processKeypressNormal(self: *Editor, c: u16) !bool {
         // To be replace by current buffer.
         const state = self.cur_buffer;
+        if (c == ctrlKey('l') or c == '\x1b') {
+            self.cmd_buffer.clear();
+            return true;
+        }
+        if (self.cmd_buffer.len > 0 and c != 0) {
+            try self.processExtendedCommand(c);
+            return true;
+        }
         switch (c) {
-            0 => return true, // 0 is EndOfStream.
+            0,
+            => return true, // 0 is EndOfStream.
+            // TODO: read about ctrl+l, is this an Esc?
+            // It was in the tutorial, but I forgot.
+            ctrlKey('l'), '\x1b' => {
+                return true;
+            },
             'h' => self.moveCursor(kb.KEY_LEFT),
             'j' => self.moveCursor(kb.KEY_DOWN),
             'k' => self.moveCursor(kb.KEY_UP),
@@ -156,7 +210,10 @@ pub const Editor = struct {
                     try self.cur_buffer.delCharToLeft();
                 }
             },
-            'G' => state.cy = state.len() - 1,
+            'G' => {
+                state.cy = state.len() - 1;
+                state.cx = 0;
+            },
             // Example of using a command prompt.
             kb.KEY_PROMPT => {
                 const maybe_cmd = try self.get_prompt(":");
@@ -173,12 +230,31 @@ pub const Editor = struct {
                 }
             },
             else => {
-                self.mode = Mode.normal;
+                try self.processExtendedCommand(c);
+                return true;
             },
         }
 
         state.confirm_to_quit = true;
         return true;
+    }
+
+    fn processExtendedCommand(self: *Editor, c: u16) !void {
+        // TODO: Is this a correct check?
+        if (c < 128) {
+            const casted_char = std.math.cast(u8, c) orelse return error.ValueTooBig;
+            self.cmd_buffer.append(casted_char);
+        }
+        if (self.cmd_buffer.len == 0) {
+            return;
+        }
+
+        const cmd = self.cmd_buffer.cmd();
+        if (std.mem.eql(u8, cmd, "gg")) {
+            self.cur_buffer.cx = 0;
+            self.cur_buffer.cy = 0;
+            self.cmd_buffer.clear();
+        }
     }
 
     fn processKeypressInsert(self: *Editor, c: u16) !bool {
@@ -258,10 +334,13 @@ pub const Editor = struct {
         try str_buffer.append("\x1b[7m");
 
         // Reserve space for lines.
+        // TODO This has to be within screencols.
         var lbuffer: [100]u8 = undefined;
-        const lines = try std.fmt.bufPrint(&lbuffer, " {s} {d}/{d}", .{ @tagName(self.mode), self.cur_buffer.cy + 1, self.cur_buffer.len() });
+        const cmd_string = if (self.cmd_buffer.len > 0) self.cmd_buffer.cmd() else "";
+        const lines = try std.fmt.bufPrint(&lbuffer, "{s} {s} {d}/{d}", .{ cmd_string, @tagName(self.mode), self.cur_buffer.cy + 1, self.cur_buffer.len() });
 
         const mod_string = if (self.cur_buffer.dirty > 0) " (modified)" else "";
+
         const emptyspots = self.cur_buffer.screencols - lines.len - mod_string.len;
 
         // Should we truncate from the left? What does vim do?
