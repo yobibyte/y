@@ -96,12 +96,21 @@ pub const Buffer = struct {
         self.dirty += 1;
     }
 
-    pub fn delRow(self: *Buffer, at: usize) void {
-        if (at >= self.len()) {
+    pub fn delRow(self: *Buffer, at: ?usize) void {
+        var row_idx: usize = undefined;
+        if (at) |idx| {
+            row_idx = idx;
+        } else {
+            row_idx = self.cy;
+        }
+        if (row_idx >= self.len()) {
             return;
         }
-        const crow = self.rows.orderedRemove(at);
+        const crow = self.rows.orderedRemove(row_idx);
         crow.deinit();
+        if (row_idx == self.len()) {
+            self.cy -= 1;
+        }
         self.dirty += 1;
     }
 
@@ -186,7 +195,7 @@ pub const Buffer = struct {
                 }
             },
             kb.KEY_DOWN => {
-                if (self.cy < self.len()) {
+                if (self.cy < self.len() - 1) {
                     self.cy += 1;
                 }
             },
@@ -243,7 +252,7 @@ pub const Buffer = struct {
             self.cx = prev_row.content.len;
             // Join the two rows.
             try prev_row.append(self.rows.items[self.cy].content);
-            self.delRow(self.cy); // Remove the current row
+            self.delRow(null); // Remove the current row
             self.cy -= 1; // Move cursor up.
         }
         try crow.update();

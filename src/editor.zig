@@ -253,8 +253,12 @@ pub const Editor = struct {
         if (std.mem.eql(u8, cmd, "gg")) {
             self.cur_buffer.cx = 0;
             self.cur_buffer.cy = 0;
-            self.cmd_buffer.clear();
+        } else if (std.mem.eql(u8, cmd, "dd")) {
+            self.cur_buffer.delRow(null);
+        } else {
+            return;
         }
+        self.cmd_buffer.clear();
     }
 
     fn processKeypressInsert(self: *Editor, c: u16) !bool {
