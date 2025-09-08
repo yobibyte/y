@@ -25,4 +25,7 @@ Fully switch to the new reader/writer API, do not use the oldreader
 ---------
 Figure out how to process multi-key commands with modifiers: e.g. 3w
 ---------
-
+Go to line does not work anymore!
+---------
+Go over all crow = arraylist[idx] assignment and check if we copy or get the pointer.
+---------

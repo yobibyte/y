@@ -327,9 +327,9 @@ pub const Buffer = struct {
             return;
         }
         // How can it be smaller than zero?
-        var crow = self.rows.items[self.cy];
+        const crow = &self.rows.items[self.cy];
         if (self.cx > 0) {
-            try crow.delChar(self.cx - 1);
+            try crow.*.delChar(self.cx - 1);
             self.cx -= 1;
         } else {
             // Move cursor to the joint of two new rows.
@@ -340,7 +340,7 @@ pub const Buffer = struct {
             self.delRow(null); // Remove the current row
             self.cy -= 1; // Move cursor up.
         }
-        try crow.update();
+        try crow.*.update();
         self.dirty += 1;
     }
 

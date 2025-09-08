@@ -41,7 +41,7 @@ pub const Row = struct {
                 render_idx += 1;
             }
         }
-        self.render = self.render[0..render_idx];
+        self.render = try self.allocator.realloc(self.render, render_idx);
     }
 
     // I am not sure if I want to support tabs at all.

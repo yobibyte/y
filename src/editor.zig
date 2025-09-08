@@ -346,6 +346,7 @@ pub const Editor = struct {
             // It was in the tutorial, but I forgot.
             ctrlKey('l'), '\x1b' => {
                 self.mode = Mode.normal;
+                self.cur_buffer.reset_sel();
                 return true;
             },
             'h' => self.moveCursor(kb.KEY_LEFT, true),
