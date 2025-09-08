@@ -199,6 +199,8 @@ pub const Editor = struct {
             ctrlKey('l'), '\x1b' => {
                 return true;
             },
+            '0' => self.moveCursor(kb.KEY_HOME, false),
+            '$' => self.moveCursor(kb.KEY_END, false),
             'h' => self.moveCursor(kb.KEY_LEFT, false),
             'j' => self.moveCursor(kb.KEY_DOWN, false),
             'k' => self.moveCursor(kb.KEY_UP, false),
@@ -318,7 +320,7 @@ pub const Editor = struct {
             },
             kb.KEY_END => {
                 if (state.cy < state.len()) {
-                    state.cx = state.rows.items[state.cy].content.len;
+                    state.cx = state.rows.items[state.cy].content.len - 1;
                 }
             },
 
@@ -349,6 +351,8 @@ pub const Editor = struct {
                 self.cur_buffer.reset_sel();
                 return true;
             },
+            '0' => self.moveCursor(kb.KEY_HOME, true),
+            '$' => self.moveCursor(kb.KEY_END, true),
             'h' => self.moveCursor(kb.KEY_LEFT, true),
             'j' => self.moveCursor(kb.KEY_DOWN, true),
             'k' => self.moveCursor(kb.KEY_UP, true),

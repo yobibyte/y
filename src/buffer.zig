@@ -295,7 +295,15 @@ pub const Buffer = struct {
                     }
                 }
             },
-            else => {},
+            kb.KEY_HOME => {
+                self.cx = 0;
+            },
+            kb.KEY_END => {
+                if (self.cy < self.len()) {
+                    self.cx = self.rows.items[self.cy].content.len - 1;
+                }
+            },
+            else => return,
         }
 
         const rowlen = if (self.cy < self.len()) self.rows.items[self.cy].content.len else 0;
