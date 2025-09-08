@@ -348,10 +348,10 @@ pub const Buffer = struct {
         if (self.cx == 0) {
             try self.insertRow(self.cy, "");
         } else {
-            var crow = self.rows.items[self.cy];
-            try self.insertRow(self.cy + 1, crow.content[self.cx..]);
-            crow.content = crow.content[0..self.cx];
-            try crow.update();
+            const crow = &self.rows.items[self.cy];
+            try self.insertRow(self.cy + 1, crow.*.content[self.cx..]);
+            crow.*.content = crow.*.content[0..self.cx];
+            try crow.*.update();
         }
         self.cy += 1;
         self.cx = 0;
@@ -363,11 +363,11 @@ pub const Buffer = struct {
         var cur_idx = self.cy;
         var search_start_x = @min(self.rx + 1, self.rows.items[cur_idx].render.len);
         while (true) {
-            const crow = self.rows.items[cur_idx];
-            const maybe_match_idx = std.mem.indexOf(u8, crow.render[search_start_x..], query);
+            const crow = &self.rows.items[cur_idx];
+            const maybe_match_idx = std.mem.indexOf(u8, crow.*.render[search_start_x..], query);
             if (maybe_match_idx) |match| {
                 self.cy = cur_idx;
-                self.cx = crow.rxToCx(match) + search_start_x;
+                self.cx = crow.*.rxToCx(match) + search_start_x;
                 if (self.len() - cur_idx > self.screenrows) {
                     self.rowoffset = self.len();
                 }
