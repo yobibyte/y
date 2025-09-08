@@ -15,6 +15,27 @@ const zon: struct {
 
 const welcome_msg = "yobibyte's text editor, version " ++ zon.version ++ ".";
 
+pub const Coord = struct {
+    x: usize,
+    y: usize,
+
+    pub fn cmp(self: *Coord, other: *Coord) std.math.Order {
+        if (self.y > other.y) {
+            return .gt;
+        }
+        if (self.y < other.y) {
+            return .lt;
+        }
+        if (self.x > other.x) {
+            return .gt;
+        }
+        if (self.x < other.x) {
+            return .lt;
+        }
+        return .eq;
+    }
+};
+
 pub const Buffer = struct {
     allocator: std.mem.Allocator,
     screenrows: usize,
@@ -31,9 +52,18 @@ pub const Buffer = struct {
     dirty: u64,
     confirm_to_quit: bool, // if set, quit without confirmation, reset when pressed Ctrl+Q once.
     comment_chars: []const u8,
+    sel_start: Coord,
+    sel_end: Coord,
 
     pub fn len(self: *Buffer) usize {
         return self.rows.items.len;
+    }
+
+    pub fn reset_sel(self: *Buffer) void {
+        self.sel_start.x = 0;
+        self.sel_start.y = 0;
+        self.sel_end.x = 0;
+        self.sel_end.y = 0;
     }
 
     pub fn rowsToString(self: *Buffer) ![]u8 {
@@ -72,6 +102,9 @@ pub const Buffer = struct {
         self.comment_chars = "//";
         self.screenrows = screenrows;
         self.screencols = screencols;
+        // For selection, x in the render space, y in the row space.
+        self.sel_start = Coord{ .x = 0, .y = 0 };
+        self.sel_end = Coord{ .x = 0, .y = 0 };
         return self;
     }
 
@@ -174,12 +207,48 @@ pub const Buffer = struct {
                 }
             } else {
                 const offset_row = self.rows.items[filerow].render;
-                if (offset_row.len >= self.coloffset) {
-                    var maxlen = offset_row.len - self.coloffset;
-                    if (maxlen > self.screencols) {
-                        maxlen = self.screencols;
+                var maxlen = offset_row.len - self.coloffset;
+                if (maxlen > self.screencols) {
+                    maxlen = self.screencols;
+                }
+
+                var crow_sel_start_rx: usize = 0;
+                var crow_sel_end_rx: usize = 0;
+                if (self.sel_start.y <= filerow and filerow <= self.sel_end.y) {
+                    if (filerow == self.sel_start.y) {
+                        crow_sel_start_rx = self.sel_start.x;
+                        if (filerow < self.sel_end.y) {
+                            crow_sel_end_rx = self.coloffset + maxlen;
+                        }
                     }
-                    try str_buffer.append(offset_row[self.coloffset .. self.coloffset + maxlen]);
+                    if (filerow == self.sel_end.y) {
+                        crow_sel_end_rx = self.sel_end.x;
+                        if (crow_sel_end_rx > self.coloffset + maxlen) {
+                            crow_sel_end_rx = self.coloffset + maxlen;
+                        }
+                    }
+                    if (self.sel_start.y < filerow and filerow < self.sel_end.y) {
+                        crow_sel_start_rx = self.coloffset;
+                        crow_sel_end_rx = self.coloffset + maxlen;
+                    }
+
+                    //TODO checks?
+                    try str_buffer.append(offset_row[self.coloffset..crow_sel_start_rx]);
+                    try str_buffer.append("\x1b[7m");
+                    if (maxlen == 0) {
+                        //TODO: simplify?
+                        try str_buffer.append(" ");
+                    } else {
+                        if (offset_row.len >= self.coloffset) {
+                            try str_buffer.append(offset_row[crow_sel_start_rx..crow_sel_end_rx]);
+                        }
+                    }
+                    try str_buffer.append("\x1b[0m");
+                    try str_buffer.append(offset_row[crow_sel_end_rx .. self.coloffset + maxlen]);
+                } else {
+                    if (offset_row.len >= self.coloffset) {
+                        try str_buffer.append(offset_row[self.coloffset .. self.coloffset + maxlen]);
+                    }
                 }
             }
             try str_buffer.append("\x1b[K");
@@ -187,32 +256,48 @@ pub const Buffer = struct {
         }
     }
 
-    pub fn moveCursor(self: *Buffer, key: u16) void {
+    pub fn moveCursor(self: *Buffer, key: u16, select: bool) void {
         switch (key) {
+            // TODO: do the boundary checks, there's a chance we do +=1 and go beyond rx here.
             kb.KEY_LEFT => {
                 if (self.cx > 0) {
                     self.cx -= 1;
+                    if (select) {
+                        self.sel_end.x -= 1;
+                    }
                 }
             },
             kb.KEY_DOWN => {
                 if (self.cy < self.len() - 1) {
                     self.cy += 1;
+                    if (select) {
+                        self.sel_end.y += 1;
+                        self.sel_end.x = self.rx;
+                    }
                 }
             },
             kb.KEY_UP => {
                 if (self.cy > 0) {
                     self.cy -= 1;
+                    if (select) {
+                        self.sel_end.y -= 1;
+                        self.sel_end.x = self.rx;
+                    }
                 }
             },
             kb.KEY_RIGHT => {
                 if (self.cy < self.len()) {
                     if (self.cx < self.rows.items[self.cy].content.len) {
                         self.cx += 1;
+                        if (select) {
+                            self.sel_end.x += 1;
+                        }
                     }
                 }
             },
-            else => return,
+            else => {},
         }
+
         const rowlen = if (self.cy < self.len()) self.rows.items[self.cy].content.len else 0;
         if (self.cx > rowlen) {
             self.cx = rowlen;

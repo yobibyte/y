@@ -3,7 +3,9 @@ Implement forward/backward search.
 ---------
 Show tabs as spaces, do not do weird up to TAB_WIDTH padding.
 ---------
-Editor crashes when we esc-delete from first char of next row and the rows are joined.
+Simplify logic of highlight in the visual mode
+---------
+Editor crashes when we backspace-delete from first char of next row and the rows are joined.
 ---------
 Return nullable from search so that we could show a status message that nothing is found.
 ---------
@@ -23,5 +25,4 @@ Fully switch to the new reader/writer API, do not use the oldreader
 ---------
 Figure out how to process multi-key commands with modifiers: e.g. 3w
 ---------
-
 

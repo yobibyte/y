@@ -15,6 +15,7 @@ inline fn ctrlKey(k: u8) u8 {
 pub const Mode = enum {
     normal,
     insert,
+    visual,
 };
 
 pub const CommandBuffer = struct {
@@ -167,11 +168,16 @@ pub const Editor = struct {
         return switch (self.mode) {
             Mode.normal => try self.processKeypressNormal(c),
             Mode.insert => try self.processKeypressInsert(c),
+            Mode.visual => try self.processKeypressVisual(c),
         };
     }
 
-    fn moveCursor(self: *Editor, key: u16) void {
-        self.cur_buffer.moveCursor(key);
+    fn moveCursor(self: *Editor, key: u16, select: bool) void {
+        self.cur_buffer.moveCursor(key, select);
+        if (self.cur_buffer.sel_start.cmp(&self.cur_buffer.sel_end) == .gt) {
+            self.cur_buffer.reset_sel();
+            self.mode = Mode.normal;
+        }
     }
 
     fn processKeypressNormal(self: *Editor, c: u16) !bool {
@@ -193,10 +199,18 @@ pub const Editor = struct {
             ctrlKey('l'), '\x1b' => {
                 return true;
             },
-            'h' => self.moveCursor(kb.KEY_LEFT),
-            'j' => self.moveCursor(kb.KEY_DOWN),
-            'k' => self.moveCursor(kb.KEY_UP),
-            'l' => self.moveCursor(kb.KEY_RIGHT),
+            'h' => self.moveCursor(kb.KEY_LEFT, false),
+            'j' => self.moveCursor(kb.KEY_DOWN, false),
+            'k' => self.moveCursor(kb.KEY_UP, false),
+            'l' => self.moveCursor(kb.KEY_RIGHT, false),
+            'v' => {
+                self.mode = Mode.visual;
+                self.cur_buffer.sel_start.x = self.cur_buffer.rx;
+                self.cur_buffer.sel_start.y = self.cur_buffer.cy;
+                self.cur_buffer.sel_end.x = self.cur_buffer.rx + 1;
+                // Select 1 char.
+                self.cur_buffer.sel_end.y = self.cur_buffer.cy;
+            },
             'i' => self.mode = Mode.insert,
             's' => try self.save(),
             '/' => try self.search(true),
@@ -205,7 +219,7 @@ pub const Editor = struct {
             'x', kb.KEY_DEL => {
                 if (state.cy < state.len()) {
                     if (state.cx < state.rows.items[state.cy].content.len) {
-                        self.moveCursor(kb.KEY_RIGHT);
+                        self.moveCursor(kb.KEY_RIGHT, false);
                     }
                     try self.cur_buffer.delCharToLeft();
                 }
@@ -268,16 +282,16 @@ pub const Editor = struct {
             0 => return true, // 0 is EndOfStream.
             '\r' => try self.cur_buffer.insertNewLine(),
             ctrlKey('q') => return self.quit(),
-            kb.KEY_UP, kb.KEY_DOWN, kb.KEY_RIGHT, kb.KEY_LEFT => self.moveCursor(c),
+            kb.KEY_UP, kb.KEY_DOWN, kb.KEY_RIGHT, kb.KEY_LEFT => self.moveCursor(c, false),
             kb.KEY_BACKSPACE, kb.KEY_DEL, ctrlKey('h') => {
                 if (c == kb.KEY_DEL) {
                     // We should be joining the two rows in here in the insert mode.
                     if (state.cy < state.len()) {
                         if (state.cx == state.rows.items[state.cy].content.len) {
                             state.cx = 0;
-                            self.moveCursor(kb.KEY_DOWN);
+                            self.moveCursor(kb.KEY_DOWN, false);
                         } else {
-                            self.moveCursor(kb.KEY_RIGHT);
+                            self.moveCursor(kb.KEY_RIGHT, false);
                         }
                         try self.cur_buffer.delCharToLeft();
                     }
@@ -295,7 +309,7 @@ pub const Editor = struct {
                     }
                 }
                 for (0..state.screenrows) |_| {
-                    self.moveCursor(if (c == kb.KEY_PGUP) kb.KEY_UP else kb.KEY_DOWN);
+                    self.moveCursor(if (c == kb.KEY_PGUP) kb.KEY_UP else kb.KEY_DOWN, false);
                 }
             },
             ctrlKey('s') => try self.save(),
@@ -319,6 +333,33 @@ pub const Editor = struct {
             },
         }
         // Reset confirmation flag when any other key than Ctrl+q was typed.
+        state.confirm_to_quit = true;
+        return true;
+    }
+
+    fn processKeypressVisual(self: *Editor, c: u16) !bool {
+        const state = self.cur_buffer;
+        switch (c) {
+            0,
+            => return true, // 0 is EndOfStream.
+            // TODO: read about ctrl+l, is this an Esc?
+            // It was in the tutorial, but I forgot.
+            ctrlKey('l'), '\x1b' => {
+                self.mode = Mode.normal;
+                return true;
+            },
+            'h' => self.moveCursor(kb.KEY_LEFT, true),
+            'j' => self.moveCursor(kb.KEY_DOWN, true),
+            'k' => self.moveCursor(kb.KEY_UP, true),
+            'l' => self.moveCursor(kb.KEY_RIGHT, true),
+            'x', kb.KEY_DEL => {
+                //TODO: delete selection
+            },
+            else => {
+                return true;
+            },
+        }
+
         state.confirm_to_quit = true;
         return true;
     }
@@ -373,7 +414,6 @@ pub const Editor = struct {
         // TODO: Make this bigger?
         var str_buf = try str.String.init(80, self.allocator);
         defer str_buf.deinit();
-
         try str_buf.append("\x1b[?25l");
         try str_buf.append("\x1b[H");
         try self.cur_buffer.drawRows(str_buf);

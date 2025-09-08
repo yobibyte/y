@@ -34,14 +34,15 @@ I am here to have fun and learn.
 - [x] Basic mode and motions support (normal/insert, hjkl).
 - [x] Go to a line number with :<line number>.
 - [x] Commenting out code with language-dependent comment chars.
-- [ ] Search chapter from the tutorial.
+- [x] Search chapter from the tutorial.
+- [x] Visual mode.
 - [ ] More advanced vim motions.
 - [ ] Line wrapping.
 - [ ] Search and Replace.
 - [ ] Tab expansion, controlling tabwidth.
 - [ ] Multiple buffers.
 - [ ] Undo.
-- [ ] Visual/replace mode.
+- [ ] Replace mode.
 - [ ] Using system's clipboard (vim.o.clipboard = "unnamedplus").
 - [ ] An ability to run a bash command from the editor.
 - [ ] An ability to pipe the output from above to an open buffer (or create a buffer with it).
