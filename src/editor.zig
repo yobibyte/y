@@ -245,7 +245,9 @@ pub const Editor = struct {
                     } else if (std.mem.eql(u8, cmd[0..2], "e ")) {
                         try self.add_buffer(cmd[2..]);
                     } else if (std.mem.eql(u8, cmd, "bd")) {
-                        //
+                        try self.close_buffer(false);
+                    } else if (std.mem.eql(u8, cmd, "bd!")) {
+                        try self.close_buffer(true);
                     } else if (std.mem.eql(u8, cmd, "bn")) {
                         self.next_buffer();
                     } else if (std.mem.eql(u8, cmd, "bp")) {
@@ -621,7 +623,21 @@ pub const Editor = struct {
         }
     }
 
+    fn close_buffer(self: *Editor, forced: bool) !void {
+        if (!forced) {
+            if (self.cur_buffer().dirty > 0) {
+                try self.setStatusMessage("You have unsaved changes. Use the quit command again if you still want to quit.");
+                return;
+            }
+        }
+        // TODO: add command to delete by id. If empty, remove current.
+        const buf = self.buffers.orderedRemove(self.cur_buffer_idx);
+        buf.deinit();
+        self.cur_buffer_idx -= 1;
+    }
+
     fn quit(self: *Editor) !bool {
+        // TODO: get rid of confirmed to quit, use Q to quit forcibly or :bd! :q!
         if (self.cur_buffer().dirty > 0 and self.cur_buffer().confirm_to_quit) {
             self.cur_buffer().confirm_to_quit = false;
             try self.setStatusMessage("You have unsaved changes. Use the quit command again if you still want to quit.");

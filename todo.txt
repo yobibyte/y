@@ -1,4 +1,6 @@
 ---------
+Copy/paste in visual mode, internal register only.
+---------
 Forward/backward search.
 ---------
 Simplify logic of highlight in the visual mode
