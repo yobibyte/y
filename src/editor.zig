@@ -294,6 +294,12 @@ pub const Editor = struct {
         switch (c) {
             0 => return true, // 0 is EndOfStream.
             '\r' => try self.cur_buffer.insertNewLine(),
+            '\t' => {
+                // Expand tabs.
+                for (0..config.TAB_WIDTH) |_|{
+                    try self.cur_buffer.insertChar(' ');
+                }
+            },
             ctrlKey('q') => return self.quit(),
             kb.KEY_UP, kb.KEY_DOWN, kb.KEY_RIGHT, kb.KEY_LEFT => self.moveCursor(c, false),
             kb.KEY_BACKSPACE, kb.KEY_DEL, ctrlKey('h') => {

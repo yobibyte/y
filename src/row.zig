@@ -30,9 +30,7 @@ pub const Row = struct {
         var render_idx: usize = 0;
         for (self.content) |c| {
             if (c == '\t') {
-                self.render[render_idx] = ' ';
-                render_idx += 1;
-                while (render_idx % config.TAB_WIDTH != 0) {
+                for (0..config.TAB_WIDTH) |_| {
                     self.render[render_idx] = ' ';
                     render_idx += 1;
                 }
@@ -41,7 +39,6 @@ pub const Row = struct {
                 render_idx += 1;
             }
         }
-        self.render = try self.allocator.realloc(self.render, render_idx);
     }
 
     // I am not sure if I want to support tabs at all.
@@ -51,7 +48,7 @@ pub const Row = struct {
 
         for (self.content[0..cx]) |c| {
             if (c == '\t') {
-                rx += (config.TAB_WIDTH - 1) - (rx % config.TAB_WIDTH);
+                rx += (config.TAB_WIDTH - 1);
             }
             rx += 1;
         }
@@ -63,7 +60,7 @@ pub const Row = struct {
 
         for (self.render, 0..self.content.len) |c, cx| {
             if (c == '\t') {
-                cur_rx += (config.TAB_WIDTH - 1) - (cur_rx % config.TAB_WIDTH);
+                cur_rx += (config.TAB_WIDTH - 1);
             }
             cur_rx += 1;
             if (cur_rx > rx) {

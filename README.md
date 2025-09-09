@@ -1,4 +1,4 @@
-# y: yobibyte's text editor
+                            # y: yobibyte's text editor
 
 `y` is a highly opionated text editor written by yobibyte.
 It started as following the [kilo](https://viewsourcecode.org/snaptoken/kilo/index.html) tutorial in Zig, but grew out in something bigger.
@@ -36,16 +36,17 @@ I am here to have fun and learn.
 - [x] Commenting out code with language-dependent comment chars.
 - [x] Search chapter from the tutorial.
 - [x] Visual mode.
-- [ ] More advanced vim motions.
-- [ ] Line wrapping.
-- [ ] Search and Replace.
-- [ ] Tab expansion, controlling tabwidth.
+- [x] Tab expansion, controlling tabwidth.
 - [ ] Multiple buffers.
 - [ ] Undo.
 - [ ] Replace mode.
-- [ ] Using system's clipboard (vim.o.clipboard = "unnamedplus").
+- [ ] Search and Replace.
+- [ ] Regex engine.
+- [ ] More vim motions (dap/vap/dip/vip/viw/ciw/diw,dib,di{/[/")
 - [ ] An ability to run a bash command from the editor.
 - [ ] An ability to pipe the output from above to an open buffer (or create a buffer with it).
+- [ ] Line wrapping.
 - [ ] Utf8 support.
+- [ ] Using system's clipboard (vim.o.clipboard = "unnamedplus").
 - [ ] Quickfix list.
 - [ ] Vertical/horizontal splits.

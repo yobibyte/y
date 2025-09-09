@@ -1,8 +1,6 @@
 ---------
 Forward/backward search.
 ---------
-Show tabs as spaces, do not do weird up to TAB_WIDTH padding.
----------
 Simplify logic of highlight in the visual mode
 ---------
 Return nullable from search so that we could show a status message that nothing is found.
