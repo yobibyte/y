@@ -522,21 +522,27 @@ pub const Editor = struct {
     }
 
     pub fn readKey(self: *Editor) !u16 {
-        var oldreader = self.reader.interface.adaptToOldInterface();
-        const c = oldreader.readByte() catch |err| switch (err) {
+        const buf: []u8 = try self.allocator.alloc(u8, 100);
+        defer self.allocator.free(buf);
+        const bytes_read = self.reader.readStreaming(buf) catch |err| switch (err) {
             error.EndOfStream => return 0,
             else => return err,
         };
-
-        if (c == '\x1b') {
-            const c1 = oldreader.readByte() catch return '\x1b';
-            if (c1 == '[') {
-                const c2 = oldreader.readByte() catch return '\x1b';
-                switch (c2) {
+        if (buf[0] == '\x1b') {
+            if (bytes_read == 1) {
+                return '\x1b';
+            }
+            if (buf[1] == '[') {
+                if (bytes_read == 2) {
+                    return '\x1b';
+                }
+                switch (buf[2]) {
                     '1'...'9' => {
-                        const c3 = oldreader.readByte() catch return '\x1b';
-                        if (c3 == '~') {
-                            switch (c2) {
+                        if (bytes_read == 3) {
+                            return '\x1b';
+                        }
+                        if (buf[3] == '~') {
+                            switch (buf[2]) {
                                 '1' => return kb.KEY_HOME,
                                 '3' => return kb.KEY_DEL,
                                 '4' => return kb.KEY_END,
@@ -549,10 +555,6 @@ pub const Editor = struct {
                                 },
                             }
                         }
-                        // There is prob a method to read until the end of stream in the stdlib, but we will need to move to a new API soon, we will do it then.
-                        while (true) {
-                            _ = oldreader.readByte() catch return '\x1b';
-                        }
                     },
                     'A' => return kb.KEY_UP,
                     'B' => return kb.KEY_DOWN,
@@ -562,8 +564,8 @@ pub const Editor = struct {
                     'F' => return kb.KEY_END,
                     else => {},
                 }
-            } else if (c1 == 'O') {
-                switch (c1) {
+            } else if (buf[0] == 'O') {
+                switch (buf[1]) {
                     'H' => return kb.KEY_HOME,
                     'F' => return kb.KEY_END,
                     else => {},
@@ -571,7 +573,7 @@ pub const Editor = struct {
             }
             return '\x1b';
         } else {
-            return c;
+            return buf[0];
         }
     }
 
