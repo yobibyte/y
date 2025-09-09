@@ -25,5 +25,7 @@ Fully switch to the new reader/writer API, do not use the oldreader
 ---------
 Figure out how to process multi-key commands with modifiers: e.g. 3w
 ---------
-Go to line does not work anymore!
+go to 51gg in README, then go to gg, crash
+---------
+if there's no chance we ever hit any of the branches, clear the command stack
 ---------

@@ -265,12 +265,23 @@ pub const Editor = struct {
             return;
         }
 
+        // This has to be rewritten with regexes when I implement the regex engine.
         const cmd = self.cmd_buffer.cmd();
         if (std.mem.eql(u8, cmd, "gg")) {
             self.cur_buffer.cx = 0;
             self.cur_buffer.cy = 0;
         } else if (std.mem.eql(u8, cmd, "dd")) {
             self.cur_buffer.delRow(null);
+        } else if (cmd.len > 2) {
+            const number = std.fmt.parseInt(usize, cmd[0 .. cmd.len - 2], 10) catch 0;
+            if (number > 0 and std.mem.eql(u8, cmd[cmd.len - 2 ..], "gg")) {
+                // This check should be done on row side
+                if (number <= self.cur_buffer.len()) {
+                    self.cur_buffer.cy = number - 1;
+                }
+            } else {
+                return;
+            }
         } else {
             return;
         }
