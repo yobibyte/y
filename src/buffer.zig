@@ -87,7 +87,7 @@ pub const Buffer = struct {
         return buf;
     }
 
-    pub fn init(allocator: std.mem.Allocator, screenrows: usize, screencols: usize) !*Buffer {
+    pub fn init(allocator: std.mem.Allocator, screenrows: usize, screencols: usize, maybe_fname: ?[]const u8) !*Buffer {
         var self = try allocator.create(Buffer);
         self.allocator = allocator;
         self.cx = 0;
@@ -105,6 +105,28 @@ pub const Buffer = struct {
         // For selection, x in the render space, y in the row space.
         self.sel_start = Coord{ .x = 0, .y = 0 };
         self.sel_end = Coord{ .x = 0, .y = 0 };
+
+        if (maybe_fname) |fname| {
+            const file = try std.fs.cwd().openFile(fname, .{ .mode = .read_only });
+            defer file.close();
+
+            var stdin_buffer: [1024]u8 = undefined;
+            var reader = file.reader(&stdin_buffer);
+            while (true) {
+                const line = reader.interface.takeDelimiterExclusive('\n') catch |err| {
+                    switch (err) {
+                        error.EndOfStream => break,
+                        else => return err,
+                    }
+                };
+                try self.insertRow(self.len(), line);
+            }
+            self.filename = try self.allocator.dupe(u8, fname);
+            self.setCommentChars();
+            // InsertRow calls above modify the dirty counter -> reset.
+            self.dirty = 0;
+        }
+
         return self;
     }
 

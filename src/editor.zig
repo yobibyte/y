@@ -61,7 +61,8 @@ pub const Editor = struct {
     handle: std.posix.fd_t,
     reader: std.fs.File.Reader,
     stdin_buffer: [1024]u8,
-    cur_buffer: *buffer.Buffer,
+    buffers: std.array_list.Managed(*buffer.Buffer),
+    cur_buffer_idx: usize,
     mode: Mode,
     orig_term: posix.system.termios,
     screenrows: usize,
@@ -88,16 +89,16 @@ pub const Editor = struct {
         // This is temporal. I will split the state into two parts:
         // Some of the editor-level vars will move to just Editor fields.
         // The rest, like Rows, will become buffers, and editor will keep a list (or a map) of buffers.
-        self.cur_buffer = undefined;
         self.mode = Mode.normal;
         self.statusmsg = "";
         self.statusmsg_time = 0;
 
         self.search_pattern = null;
 
+        self.cur_buffer_idx = undefined;
         try self.enableRawMode(self.handle);
-        self.cur_buffer = try buffer.Buffer.init(self.allocator, self.screenrows, self.screencols);
 
+        self.buffers = std.array_list.Managed(*buffer.Buffer).init(allocator);
         self.cmd_buffer = try CommandBuffer.init(self.allocator);
         return self;
     }
@@ -131,37 +132,38 @@ pub const Editor = struct {
         self.disableRawMode(self.handle, &self.stdout) catch |err| {
             std.debug.print("Failed to restore the original terminal mode: {}", .{err});
         };
-        self.cur_buffer.deinit();
         self.allocator.free(self.statusmsg);
         if (self.search_pattern) |sp| {
             self.allocator.free(sp);
         }
         self.cmd_buffer.deinit();
+        for (self.buffers.items) |buf| {
+            buf.deinit();
+        }
+        self.buffers.deinit();
         self.allocator.destroy(self);
     }
 
-    pub fn open(self: *Editor, fname: []const u8) !void {
-        const file = try std.fs.cwd().openFile(fname, .{ .mode = .read_only });
-        defer file.close();
-
-        // Wrap the file in a buffered reader
-        var stdin_buffer: [1024]u8 = undefined;
-        var reader = file.reader(&stdin_buffer);
-
-        while (true) {
-            const line = reader.interface.takeDelimiterExclusive('\n') catch |err| {
-                switch (err) {
-                    error.EndOfStream => break,
-                    else => return err,
-                }
-            };
-            try self.cur_buffer.insertRow(self.cur_buffer.len(), line);
+    pub fn add_buffer(self: *Editor, maybe_fname: ?[]const u8) !void {
+        const newbuf = try buffer.Buffer.init(self.allocator, self.screenrows, self.screencols, maybe_fname);
+        try self.buffers.insert(self.buffers.items.len, newbuf);
+        self.cur_buffer_idx = self.buffers.items.len - 1;
+    }
+    fn next_buffer(self: *Editor) void {
+        self.cur_buffer_idx += 1;
+        if (self.cur_buffer_idx > self.buffers.items.len - 1) {
+            self.cur_buffer_idx = 0;
         }
-        self.cur_buffer.filename = try self.allocator.dupe(u8, fname);
-        self.cur_buffer.setCommentChars();
-
-        // InsertRow calls above modify the dirty counter -> reset.
-        self.cur_buffer.dirty = 0;
+    }
+    fn prev_buffer(self: *Editor) void {
+        if (self.cur_buffer_idx == 0) {
+            self.cur_buffer_idx = self.buffers.items.len - 1;
+        } else {
+            self.cur_buffer_idx -= 1;
+        }
+    }
+    pub fn cur_buffer(self: *Editor) *buffer.Buffer {
+        return self.buffers.items[self.cur_buffer_idx];
     }
 
     pub fn processKeypress(self: *Editor, c: u16) !bool {
@@ -173,16 +175,16 @@ pub const Editor = struct {
     }
 
     fn moveCursor(self: *Editor, key: u16, select: bool) void {
-        self.cur_buffer.moveCursor(key, select);
-        if (self.cur_buffer.sel_start.cmp(&self.cur_buffer.sel_end) == .gt) {
-            self.cur_buffer.reset_sel();
+        self.cur_buffer().moveCursor(key, select);
+        if (self.cur_buffer().sel_start.cmp(&self.cur_buffer().sel_end) == .gt) {
+            self.cur_buffer().reset_sel();
             self.mode = Mode.normal;
         }
     }
 
     fn processKeypressNormal(self: *Editor, c: u16) !bool {
         // To be replace by current buffer.
-        const state = self.cur_buffer;
+        const state = self.cur_buffer();
         if (c == ctrlKey('l') or c == '\x1b') {
             self.cmd_buffer.clear();
             return true;
@@ -199,6 +201,8 @@ pub const Editor = struct {
             ctrlKey('l'), '\x1b' => {
                 return true;
             },
+            ']' => self.next_buffer(),
+            '[' => self.prev_buffer(),
             '0' => self.moveCursor(kb.KEY_HOME, false),
             '$' => self.moveCursor(kb.KEY_END, false),
             'h' => self.moveCursor(kb.KEY_LEFT, false),
@@ -207,11 +211,11 @@ pub const Editor = struct {
             'l' => self.moveCursor(kb.KEY_RIGHT, false),
             'v' => {
                 self.mode = Mode.visual;
-                self.cur_buffer.sel_start.x = self.cur_buffer.rx;
-                self.cur_buffer.sel_start.y = self.cur_buffer.cy;
-                self.cur_buffer.sel_end.x = self.cur_buffer.rx + 1;
+                self.cur_buffer().sel_start.x = self.cur_buffer().rx;
+                self.cur_buffer().sel_start.y = self.cur_buffer().cy;
+                self.cur_buffer().sel_end.x = self.cur_buffer().rx + 1;
                 // Select 1 char.
-                self.cur_buffer.sel_end.y = self.cur_buffer.cy;
+                self.cur_buffer().sel_end.y = self.cur_buffer().cy;
             },
             'i' => self.mode = Mode.insert,
             's' => try self.save(),
@@ -223,7 +227,7 @@ pub const Editor = struct {
                     if (state.cx < state.rows.items[state.cy].content.len) {
                         self.moveCursor(kb.KEY_RIGHT, false);
                     }
-                    try self.cur_buffer.delCharToLeft();
+                    try self.cur_buffer().delCharToLeft();
                 }
             },
             'G' => {
@@ -236,7 +240,16 @@ pub const Editor = struct {
                 if (maybe_cmd) |cmd| {
                     defer self.allocator.free(cmd);
                     if (std.mem.eql(u8, cmd, "c")) {
-                        try self.cur_buffer.commentLine();
+                        try self.cur_buffer().commentLine();
+                        // check for length here!
+                    } else if (std.mem.eql(u8, cmd[0..2], "e ")) {
+                        try self.add_buffer(cmd[2..]);
+                    } else if (std.mem.eql(u8, cmd, "bd")) {
+                        //
+                    } else if (std.mem.eql(u8, cmd, "bn")) {
+                        self.next_buffer();
+                    } else if (std.mem.eql(u8, cmd, "bp")) {
+                        self.prev_buffer();
                     } else {
                         const number = std.fmt.parseInt(usize, cmd, 10) catch 0;
                         if (number > 0 and number <= state.len()) {
@@ -268,16 +281,16 @@ pub const Editor = struct {
         // This has to be rewritten with regexes when I implement the regex engine.
         const cmd = self.cmd_buffer.cmd();
         if (std.mem.eql(u8, cmd, "gg")) {
-            self.cur_buffer.cx = 0;
-            self.cur_buffer.cy = 0;
+            self.cur_buffer().cx = 0;
+            self.cur_buffer().cy = 0;
         } else if (std.mem.eql(u8, cmd, "dd")) {
-            self.cur_buffer.delRow(null);
+            self.cur_buffer().delRow(null);
         } else if (cmd.len > 2) {
             const number = std.fmt.parseInt(usize, cmd[0 .. cmd.len - 2], 10) catch 0;
             if (number > 0 and std.mem.eql(u8, cmd[cmd.len - 2 ..], "gg")) {
                 // This check should be done on row side
-                if (number <= self.cur_buffer.len()) {
-                    self.cur_buffer.cy = number - 1;
+                if (number <= self.cur_buffer().len()) {
+                    self.cur_buffer().cy = number - 1;
                 }
             } else {
                 return;
@@ -290,14 +303,14 @@ pub const Editor = struct {
 
     fn processKeypressInsert(self: *Editor, c: u16) !bool {
         // To be replace by current buffer.
-        const state = self.cur_buffer;
+        const state = self.cur_buffer();
         switch (c) {
             0 => return true, // 0 is EndOfStream.
-            '\r' => try self.cur_buffer.insertNewLine(),
+            '\r' => try self.cur_buffer().insertNewLine(),
             '\t' => {
                 // Expand tabs.
-                for (0..config.TAB_WIDTH) |_|{
-                    try self.cur_buffer.insertChar(' ');
+                for (0..config.TAB_WIDTH) |_| {
+                    try self.cur_buffer().insertChar(' ');
                 }
             },
             ctrlKey('q') => return self.quit(),
@@ -312,10 +325,10 @@ pub const Editor = struct {
                         } else {
                             self.moveCursor(kb.KEY_RIGHT, false);
                         }
-                        try self.cur_buffer.delCharToLeft();
+                        try self.cur_buffer().delCharToLeft();
                     }
                 } else {
-                    try self.cur_buffer.delCharToLeft();
+                    try self.cur_buffer().delCharToLeft();
                 }
             },
             kb.KEY_PGUP, kb.KEY_PGDOWN => {
@@ -347,7 +360,7 @@ pub const Editor = struct {
             else => {
                 const casted_char = std.math.cast(u8, c) orelse return error.ValueTooBig;
                 if (!std.ascii.isControl(casted_char)) {
-                    try self.cur_buffer.insertChar(casted_char);
+                    try self.cur_buffer().insertChar(casted_char);
                 }
             },
         }
@@ -357,7 +370,7 @@ pub const Editor = struct {
     }
 
     fn processKeypressVisual(self: *Editor, c: u16) !bool {
-        const state = self.cur_buffer;
+        const state = self.cur_buffer();
         switch (c) {
             0,
             => return true, // 0 is EndOfStream.
@@ -365,7 +378,7 @@ pub const Editor = struct {
             // It was in the tutorial, but I forgot.
             ctrlKey('l'), '\x1b' => {
                 self.mode = Mode.normal;
-                self.cur_buffer.reset_sel();
+                self.cur_buffer().reset_sel();
                 return true;
             },
             '0' => self.moveCursor(kb.KEY_HOME, true),
@@ -404,14 +417,14 @@ pub const Editor = struct {
         // TODO This has to be within screencols.
         var lbuffer: [100]u8 = undefined;
         const cmd_string = if (self.cmd_buffer.len > 0) self.cmd_buffer.cmd() else "";
-        const lines = try std.fmt.bufPrint(&lbuffer, "{s} {s} {d}/{d}", .{ cmd_string, @tagName(self.mode), self.cur_buffer.cy + 1, self.cur_buffer.len() });
+        const lines = try std.fmt.bufPrint(&lbuffer, "{s} {s} {d}/{d}", .{ cmd_string, @tagName(self.mode), self.cur_buffer().cy + 1, self.cur_buffer().len() });
 
-        const mod_string = if (self.cur_buffer.dirty > 0) " (modified)" else "";
+        const mod_string = if (self.cur_buffer().dirty > 0) " (modified)" else "";
 
-        const emptyspots = self.cur_buffer.screencols - lines.len - mod_string.len;
+        const emptyspots = self.cur_buffer().screencols - lines.len - mod_string.len;
 
         // Should we truncate from the left? What does vim do?
-        var fname = self.cur_buffer.filename orelse "[no name]";
+        var fname = self.cur_buffer().filename orelse "[no name]";
         if (fname.len > emptyspots) {
             fname = fname[0..emptyspots];
         }
@@ -432,17 +445,17 @@ pub const Editor = struct {
     }
 
     pub fn refreshScreen(self: *Editor) !void {
-        self.cur_buffer.scroll();
+        self.cur_buffer().scroll();
         // TODO: Make this bigger?
         var str_buf = try str.String.init(80, self.allocator);
         defer str_buf.deinit();
         try str_buf.append("\x1b[?25l");
         try str_buf.append("\x1b[H");
-        try self.cur_buffer.drawRows(str_buf);
+        try self.cur_buffer().drawRows(str_buf);
         try self.drawStatusBar(str_buf);
         try self.drawMessageBar(str_buf);
         var buf: [20]u8 = undefined;
-        const escape_code = try std.fmt.bufPrint(&buf, "\x1b[{d};{d}H", .{ self.cur_buffer.cy - self.cur_buffer.rowoffset + 1, self.cur_buffer.rx - self.cur_buffer.coloffset + 1 });
+        const escape_code = try std.fmt.bufPrint(&buf, "\x1b[{d};{d}H", .{ self.cur_buffer().cy - self.cur_buffer().rowoffset + 1, self.cur_buffer().rx - self.cur_buffer().coloffset + 1 });
         try str_buf.append(escape_code);
 
         try str_buf.append("\x1b[?25h");
@@ -497,16 +510,16 @@ pub const Editor = struct {
 
     // TODO: This should prob be on the buffer level.
     fn save(self: *Editor) !void {
-        if (self.cur_buffer.filename == null) {
+        if (self.cur_buffer().filename == null) {
             const prompt = try self.get_prompt("Save as: ");
             if (prompt) |fname| {
                 defer self.allocator.free(fname);
-                self.cur_buffer.filename = try self.allocator.dupe(u8, fname);
+                self.cur_buffer().filename = try self.allocator.dupe(u8, fname);
             }
         }
-        if (self.cur_buffer.filename) |fname| {
-            self.cur_buffer.setCommentChars();
-            const buf = try self.cur_buffer.rowsToString();
+        if (self.cur_buffer().filename) |fname| {
+            self.cur_buffer().setCommentChars();
+            const buf = try self.cur_buffer().rowsToString();
             defer self.allocator.free(buf);
             const file = try std.fs.cwd().createFile(fname, .{ .truncate = true });
             defer file.close();
@@ -520,7 +533,7 @@ pub const Editor = struct {
             var fmt_buf: [100]u8 = undefined;
             const success_msg = try std.fmt.bufPrint(&fmt_buf, "{d} bytes written to disk.", .{buf.len});
             try self.setStatusMessage(success_msg);
-            self.cur_buffer.dirty = 0;
+            self.cur_buffer().dirty = 0;
         } else {
             try self.setStatusMessage("Save aborted.");
             return;
@@ -604,13 +617,13 @@ pub const Editor = struct {
             }
         }
         if (self.search_pattern) |sp| {
-            try self.cur_buffer.search(sp);
+            try self.cur_buffer().search(sp);
         }
     }
 
     fn quit(self: *Editor) !bool {
-        if (self.cur_buffer.dirty > 0 and self.cur_buffer.confirm_to_quit) {
-            self.cur_buffer.confirm_to_quit = false;
+        if (self.cur_buffer().dirty > 0 and self.cur_buffer().confirm_to_quit) {
+            self.cur_buffer().confirm_to_quit = false;
             try self.setStatusMessage("You have unsaved changes. Use the quit command again if you still want to quit.");
             return true;
         }

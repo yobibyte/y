@@ -47,7 +47,7 @@ pub fn main() !void {
     defer ed.deinit();
 
     if (std.os.argv.len > 1) {
-        try ed.open(std.mem.span(std.os.argv[1]));
+        try ed.add_buffer(std.mem.span(std.os.argv[1]));
     }
 
     while (true) {

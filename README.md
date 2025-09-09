@@ -1,4 +1,4 @@
-                            # y: yobibyte's text editor
+# y: yobibyte's text editor
 
 `y` is a highly opionated text editor written by yobibyte.
 It started as following the [kilo](https://viewsourcecode.org/snaptoken/kilo/index.html) tutorial in Zig, but grew out in something bigger.
@@ -37,7 +37,7 @@ I am here to have fun and learn.
 - [x] Search chapter from the tutorial.
 - [x] Visual mode.
 - [x] Tab expansion, controlling tabwidth.
-- [ ] Multiple buffers.
+- [x] Multiple buffers.
 - [ ] Undo.
 - [ ] Replace mode.
 - [ ] Search and Replace.

@@ -19,3 +19,5 @@ Learn how to set the max field width dynamically in zig.
 ---------
 if there's no chance we ever hit any of the branches, clear the command stack
 ---------
+add :bd/:bn/:bp
+---------
