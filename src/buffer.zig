@@ -50,7 +50,6 @@ pub const Buffer = struct {
     // Can do with a bool now, but probably will be useful for tracking undo.
     // Probably, with the undo file, we can make it signed, but I will change it later.
     dirty: u64,
-    confirm_to_quit: bool, // if set, quit without confirmation, reset when pressed Ctrl+Q once.
     comment_chars: []const u8,
     sel_start: Coord,
     sel_end: Coord,
@@ -98,7 +97,6 @@ pub const Buffer = struct {
         self.coloffset = 0;
         self.filename = null;
         self.dirty = 0;
-        self.confirm_to_quit = true;
         self.comment_chars = "//";
         self.screenrows = screenrows;
         self.screencols = screencols;

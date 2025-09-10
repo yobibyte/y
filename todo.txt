@@ -21,5 +21,4 @@ Learn how to set the max field width dynamically in zig.
 ---------
 if there's no chance we ever hit any of the branches, clear the command stack
 ---------
-add :bd/:bn/:bp
----------
+add a check when adding a buffer that there is no buffer with this name, and either open the buf, or show a message that you need to save.

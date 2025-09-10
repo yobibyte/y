@@ -50,12 +50,9 @@ pub fn main() !void {
         try ed.add_buffer(std.mem.span(std.os.argv[1]));
     }
 
-    while (true) {
+    while (!ed.quit_flag) {
         try ed.refreshScreen();
         const c = try ed.readKey();
-        const should_continue = try ed.processKeypress(c);
-        if (!should_continue) {
-            break;
-        }
+        try ed.processKeypress(c);
     }
 }

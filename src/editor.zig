@@ -71,6 +71,7 @@ pub const Editor = struct {
     statusmsg_time: i64,
     search_pattern: ?[]const u8,
     cmd_buffer: *CommandBuffer,
+    quit_flag: bool,
 
     pub fn init(allocator: std.mem.Allocator) !*Editor {
         var self = try allocator.create(Editor);
@@ -100,6 +101,7 @@ pub const Editor = struct {
 
         self.buffers = std.array_list.Managed(*buffer.Buffer).init(allocator);
         self.cmd_buffer = try CommandBuffer.init(self.allocator);
+        self.quit_flag = false;
         return self;
     }
 
@@ -166,12 +168,12 @@ pub const Editor = struct {
         return self.buffers.items[self.cur_buffer_idx];
     }
 
-    pub fn processKeypress(self: *Editor, c: u16) !bool {
-        return switch (self.mode) {
+    pub fn processKeypress(self: *Editor, c: u16) !void {
+        switch (self.mode) {
             Mode.normal => try self.processKeypressNormal(c),
             Mode.insert => try self.processKeypressInsert(c),
             Mode.visual => try self.processKeypressVisual(c),
-        };
+        }
     }
 
     fn moveCursor(self: *Editor, key: u16, select: bool) void {
@@ -182,24 +184,24 @@ pub const Editor = struct {
         }
     }
 
-    fn processKeypressNormal(self: *Editor, c: u16) !bool {
+    fn processKeypressNormal(self: *Editor, c: u16) !void {
         // To be replace by current buffer.
         const state = self.cur_buffer();
         if (c == ctrlKey('l') or c == '\x1b') {
             self.cmd_buffer.clear();
-            return true;
+            return;
         }
         if (self.cmd_buffer.len > 0 and c != 0) {
             try self.processExtendedCommand(c);
-            return true;
+            return;
         }
         switch (c) {
             0,
-            => return true, // 0 is EndOfStream.
+            => return, // 0 is EndOfStream.
             // TODO: read about ctrl+l, is this an Esc?
             // It was in the tutorial, but I forgot.
             ctrlKey('l'), '\x1b' => {
-                return true;
+                return;
             },
             ']' => self.next_buffer(),
             '[' => self.prev_buffer(),
@@ -221,7 +223,7 @@ pub const Editor = struct {
             's' => try self.save(),
             '/' => try self.search(true),
             'n' => try self.search(false),
-            'q' => return self.quit(),
+            'q' => try self.quit(),
             'x', kb.KEY_DEL => {
                 if (state.cy < state.len()) {
                     if (state.cx < state.rows.items[state.cy].content.len) {
@@ -245,9 +247,9 @@ pub const Editor = struct {
                     } else if (std.mem.eql(u8, cmd[0..2], "e ")) {
                         try self.add_buffer(cmd[2..]);
                     } else if (std.mem.eql(u8, cmd, "bd")) {
-                        try self.close_buffer(false);
+                        return try self.close_buffer(false);
                     } else if (std.mem.eql(u8, cmd, "bd!")) {
-                        try self.close_buffer(true);
+                        return try self.close_buffer(true);
                     } else if (std.mem.eql(u8, cmd, "bn")) {
                         self.next_buffer();
                     } else if (std.mem.eql(u8, cmd, "bp")) {
@@ -260,14 +262,8 @@ pub const Editor = struct {
                     }
                 }
             },
-            else => {
-                try self.processExtendedCommand(c);
-                return true;
-            },
+            else => try self.processExtendedCommand(c),
         }
-
-        state.confirm_to_quit = true;
-        return true;
     }
 
     fn processExtendedCommand(self: *Editor, c: u16) !void {
@@ -303,11 +299,11 @@ pub const Editor = struct {
         self.cmd_buffer.clear();
     }
 
-    fn processKeypressInsert(self: *Editor, c: u16) !bool {
+    fn processKeypressInsert(self: *Editor, c: u16) !void {
         // To be replace by current buffer.
         const state = self.cur_buffer();
         switch (c) {
-            0 => return true, // 0 is EndOfStream.
+            0 => return, // 0 is EndOfStream.
             '\r' => try self.cur_buffer().insertNewLine(),
             '\t' => {
                 // Expand tabs.
@@ -315,7 +311,7 @@ pub const Editor = struct {
                     try self.cur_buffer().insertChar(' ');
                 }
             },
-            ctrlKey('q') => return self.quit(),
+            ctrlKey('q') => try self.quit(),
             kb.KEY_UP, kb.KEY_DOWN, kb.KEY_RIGHT, kb.KEY_LEFT => self.moveCursor(c, false),
             kb.KEY_BACKSPACE, kb.KEY_DEL, ctrlKey('h') => {
                 if (c == kb.KEY_DEL) {
@@ -366,22 +362,16 @@ pub const Editor = struct {
                 }
             },
         }
-        // Reset confirmation flag when any other key than Ctrl+q was typed.
-        state.confirm_to_quit = true;
-        return true;
     }
 
-    fn processKeypressVisual(self: *Editor, c: u16) !bool {
-        const state = self.cur_buffer();
+    fn processKeypressVisual(self: *Editor, c: u16) !void {
         switch (c) {
-            0,
-            => return true, // 0 is EndOfStream.
+            0 => {}, // 0 is EndOfStream.
             // TODO: read about ctrl+l, is this an Esc?
             // It was in the tutorial, but I forgot.
             ctrlKey('l'), '\x1b' => {
                 self.mode = Mode.normal;
                 self.cur_buffer().reset_sel();
-                return true;
             },
             '0' => self.moveCursor(kb.KEY_HOME, true),
             '$' => self.moveCursor(kb.KEY_END, true),
@@ -392,13 +382,8 @@ pub const Editor = struct {
             'x', kb.KEY_DEL => {
                 //TODO: delete selection
             },
-            else => {
-                return true;
-            },
+            else => {},
         }
-
-        state.confirm_to_quit = true;
-        return true;
     }
 
     fn drawMessageBar(self: *Editor, str_buffer: *str.String) !void {
@@ -633,16 +618,21 @@ pub const Editor = struct {
         // TODO: add command to delete by id. If empty, remove current.
         const buf = self.buffers.orderedRemove(self.cur_buffer_idx);
         buf.deinit();
+
+        if (self.buffers.items.len == 0) {
+            self.quit_flag = true;
+            return;
+        }
         self.cur_buffer_idx -= 1;
     }
 
-    fn quit(self: *Editor) !bool {
-        // TODO: get rid of confirmed to quit, use Q to quit forcibly or :bd! :q!
-        if (self.cur_buffer().dirty > 0 and self.cur_buffer().confirm_to_quit) {
-            self.cur_buffer().confirm_to_quit = false;
-            try self.setStatusMessage("You have unsaved changes. Use the quit command again if you still want to quit.");
-            return true;
+    // TODO: Maybe swap true/false in there? If not closed -> false, else -> true;
+    // Semantically: try_close, and if false -> we cannot close.
+    fn quit(self: *Editor) !void {
+        while (self.buffers.items.len > 0) {
+            // TODO: add forced to quit as an arg to implement q/q!/Q
+            // true if there are more buffers.
+            try self.close_buffer(false);
         }
-        return false;
     }
 };
