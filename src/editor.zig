@@ -106,6 +106,7 @@ pub const Editor = struct {
     }
 
     fn enableRawMode(self: *Editor, handle: posix.fd_t) !void {
+        //TODO: move to term.zig
         self.orig_term = try posix.tcgetattr(handle);
         var cterm = self.orig_term;
         cterm.lflag.ECHO = !cterm.lflag.ECHO;
@@ -125,6 +126,7 @@ pub const Editor = struct {
     }
 
     pub fn disableRawMode(self: *Editor, handle: posix.fd_t, writer: *const std.fs.File) !void {
+        //TODO: move to term.zig
         // Clear screen and move cursort to the top left.
         try writer.writeAll("\x1b[H\x1b[2J");
         try posix.tcsetattr(handle, .NOW, self.orig_term);

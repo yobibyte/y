@@ -50,6 +50,8 @@ pub fn main() !void {
         for (std.os.argv[1..]) |fname| {
             try ed.add_buffer(std.mem.span(fname));
         }
+    } else {
+        try ed.add_buffer(null);
     }
 
     while (!ed.quit_flag) {
