@@ -223,7 +223,8 @@ pub const Editor = struct {
             's' => try self.save(),
             '/' => try self.search(true),
             'n' => try self.search(false),
-            'q' => try self.quit(),
+            'q' => try self.quit(false),
+            'Q' => try self.quit(true),
             'x', kb.KEY_DEL => {
                 if (state.cy < state.len()) {
                     if (state.cx < state.rows.items[state.cy].content.len) {
@@ -311,7 +312,6 @@ pub const Editor = struct {
                     try self.cur_buffer().insertChar(' ');
                 }
             },
-            ctrlKey('q') => try self.quit(),
             kb.KEY_UP, kb.KEY_DOWN, kb.KEY_RIGHT, kb.KEY_LEFT => self.moveCursor(c, false),
             kb.KEY_BACKSPACE, kb.KEY_DEL, ctrlKey('h') => {
                 if (c == kb.KEY_DEL) {
@@ -611,7 +611,7 @@ pub const Editor = struct {
     fn close_buffer(self: *Editor, forced: bool) !void {
         if (!forced) {
             if (self.cur_buffer().dirty > 0) {
-                try self.setStatusMessage("You have unsaved changes. Use the quit command again if you still want to quit.");
+                try self.setStatusMessage("You have unsaved changes. Add ! (bd!/q! if you want to quit or save).");
                 return;
             }
         }
@@ -623,16 +623,13 @@ pub const Editor = struct {
             self.quit_flag = true;
             return;
         }
-        self.cur_buffer_idx -= 1;
+        self.next_buffer();
     }
 
-    // TODO: Maybe swap true/false in there? If not closed -> false, else -> true;
-    // Semantically: try_close, and if false -> we cannot close.
-    fn quit(self: *Editor) !void {
-        while (self.buffers.items.len > 0) {
-            // TODO: add forced to quit as an arg to implement q/q!/Q
-            // true if there are more buffers.
-            try self.close_buffer(false);
+    fn quit(self: *Editor, forced: bool) !void {
+        const num_buffers = self.buffers.items.len;
+        for (0..num_buffers) |_| {
+            try self.close_buffer(forced);
         }
     }
 };

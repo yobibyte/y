@@ -105,24 +105,30 @@ pub const Buffer = struct {
         self.sel_end = Coord{ .x = 0, .y = 0 };
 
         if (maybe_fname) |fname| {
-            const file = try std.fs.cwd().openFile(fname, .{ .mode = .read_only });
-            defer file.close();
-
-            var stdin_buffer: [1024]u8 = undefined;
-            var reader = file.reader(&stdin_buffer);
-            while (true) {
-                const line = reader.interface.takeDelimiterExclusive('\n') catch |err| {
-                    switch (err) {
-                        error.EndOfStream => break,
-                        else => return err,
-                    }
-                };
-                try self.insertRow(self.len(), line);
-            }
             self.filename = try self.allocator.dupe(u8, fname);
-            self.setCommentChars();
-            // InsertRow calls above modify the dirty counter -> reset.
-            self.dirty = 0;
+
+            const maybe_file = std.fs.cwd().openFile(fname, .{ .mode = .read_only }) catch |err| switch (err) {
+                error.FileNotFound => null,
+                else => return err,
+            };
+            if (maybe_file) |file| {
+                defer file.close();
+
+                var stdin_buffer: [1024]u8 = undefined;
+                var reader = file.reader(&stdin_buffer);
+                while (true) {
+                    const line = reader.interface.takeDelimiterExclusive('\n') catch |err| {
+                        switch (err) {
+                            error.EndOfStream => break,
+                            else => return err,
+                        }
+                    };
+                    try self.insertRow(self.len(), line);
+                }
+                self.setCommentChars();
+                // InsertRow calls above modify the dirty counter -> reset.
+                self.dirty = 0;
+            }
         }
 
         return self;
