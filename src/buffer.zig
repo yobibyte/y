@@ -4,6 +4,7 @@ const main = @import("main.zig");
 const config = @import("config.zig");
 const str = @import("string.zig");
 const kb = @import("kb.zig");
+const common = @import("common.zig");
 
 const zon: struct {
     name: enum { y },
@@ -212,7 +213,7 @@ pub const Buffer = struct {
             self.coloffset = self.rx - self.screencols + 1;
         }
     }
-    pub fn drawRows(self: *Buffer, str_buffer: *str.String) !void {
+    pub fn drawRows(self: *Buffer, str_buffer: *str.String, visual: bool) !void {
         for (0..self.screenrows) |crow| {
             const filerow = self.rowoffset + crow;
             // Erase in line, by default, erases everything to the right of cursor.
@@ -240,7 +241,7 @@ pub const Buffer = struct {
 
                 var crow_sel_start_rx: usize = 0;
                 var crow_sel_end_rx: usize = 0;
-                if (self.sel_start.y <= filerow and filerow <= self.sel_end.y) {
+                if (visual and self.sel_start.y <= filerow and filerow <= self.sel_end.y) {
                     if (filerow == self.sel_start.y) {
                         crow_sel_start_rx = self.sel_start.x;
                         if (filerow < self.sel_end.y) {
@@ -282,13 +283,13 @@ pub const Buffer = struct {
         }
     }
 
-    pub fn moveCursor(self: *Buffer, key: u16, select: bool) void {
+    pub fn moveCursor(self: *Buffer, key: u16, mode: common.Mode) void {
         switch (key) {
             // TODO: do the boundary checks, there's a chance we do +=1 and go beyond rx here.
             kb.KEY_LEFT => {
                 if (self.cx > 0) {
                     self.cx -= 1;
-                    if (select) {
+                    if (mode == common.Mode.visual) {
                         self.sel_end.x -= 1;
                     }
                 }
@@ -296,7 +297,7 @@ pub const Buffer = struct {
             kb.KEY_DOWN => {
                 if (self.cy < self.len() - 1) {
                     self.cy += 1;
-                    if (select) {
+                    if (mode == common.Mode.visual) {
                         self.sel_end.y += 1;
                         self.sel_end.x = self.rx;
                     }
@@ -305,7 +306,7 @@ pub const Buffer = struct {
             kb.KEY_UP => {
                 if (self.cy > 0) {
                     self.cy -= 1;
-                    if (select) {
+                    if (mode == common.Mode.visual) {
                         self.sel_end.y -= 1;
                         self.sel_end.x = self.rx;
                     }
@@ -315,7 +316,7 @@ pub const Buffer = struct {
                 if (self.cy < self.len()) {
                     if (self.cx < self.rows.items[self.cy].content.len) {
                         self.cx += 1;
-                        if (select) {
+                        if (mode == common.Mode.visual) {
                             self.sel_end.x += 1;
                         }
                     }
@@ -327,6 +328,9 @@ pub const Buffer = struct {
             kb.KEY_END => {
                 if (self.cy < self.len()) {
                     self.cx = self.rows.items[self.cy].content.len - 1;
+                }
+                if (mode == common.Mode.insert) {
+                    self.cx += 1;
                 }
             },
             else => return,
@@ -389,7 +393,6 @@ pub const Buffer = struct {
         }
         self.cy += 1;
         self.cx = 0;
-        self.dirty += 1;
     }
 
     pub fn search(self: *Buffer, query: []const u8) !void {

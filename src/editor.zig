@@ -7,16 +7,11 @@ const config = @import("config.zig");
 const term = @import("term.zig");
 const posix = std.posix;
 const kb = @import("kb.zig");
+const common = @import("common.zig");
 
 inline fn ctrlKey(k: u8) u8 {
     return k & 0x1f;
 }
-
-pub const Mode = enum {
-    normal,
-    insert,
-    visual,
-};
 
 pub const CommandBuffer = struct {
     allocator: std.mem.Allocator,
@@ -63,7 +58,7 @@ pub const Editor = struct {
     stdin_buffer: [1024]u8,
     buffers: std.array_list.Managed(*buffer.Buffer),
     cur_buffer_idx: usize,
-    mode: Mode,
+    mode: common.Mode,
     orig_term: posix.system.termios,
     screenrows: usize,
     screencols: usize,
@@ -90,7 +85,7 @@ pub const Editor = struct {
         // This is temporal. I will split the state into two parts:
         // Some of the editor-level vars will move to just Editor fields.
         // The rest, like Rows, will become buffers, and editor will keep a list (or a map) of buffers.
-        self.mode = Mode.normal;
+        self.mode = common.Mode.normal;
         self.statusmsg = "";
         self.statusmsg_time = 0;
 
@@ -172,17 +167,17 @@ pub const Editor = struct {
 
     pub fn processKeypress(self: *Editor, c: u16) !void {
         switch (self.mode) {
-            Mode.normal => try self.processKeypressNormal(c),
-            Mode.insert => try self.processKeypressInsert(c),
-            Mode.visual => try self.processKeypressVisual(c),
+            common.Mode.normal => try self.processKeypressNormal(c),
+            common.Mode.insert => try self.processKeypressInsert(c),
+            common.Mode.visual => try self.processKeypressVisual(c),
         }
     }
 
-    fn moveCursor(self: *Editor, key: u16, select: bool) void {
-        self.cur_buffer().moveCursor(key, select);
+    fn moveCursor(self: *Editor, key: u16) void {
+        self.cur_buffer().moveCursor(key, self.mode);
         if (self.cur_buffer().sel_start.cmp(&self.cur_buffer().sel_end) == .gt) {
             self.cur_buffer().reset_sel();
-            self.mode = Mode.normal;
+            self.mode = common.Mode.normal;
         }
     }
 
@@ -207,24 +202,29 @@ pub const Editor = struct {
             },
             ']' => self.next_buffer(),
             '[' => self.prev_buffer(),
-            '0' => self.moveCursor(kb.KEY_HOME, false),
-            '$' => self.moveCursor(kb.KEY_END, false),
-            'h' => self.moveCursor(kb.KEY_LEFT, false),
-            'j' => self.moveCursor(kb.KEY_DOWN, false),
-            'k' => self.moveCursor(kb.KEY_UP, false),
-            'l' => self.moveCursor(kb.KEY_RIGHT, false),
+            '0' => self.moveCursor(kb.KEY_HOME),
+            '$' => self.moveCursor(kb.KEY_END),
+            'h' => self.moveCursor(kb.KEY_LEFT),
+            'j' => self.moveCursor(kb.KEY_DOWN),
+            'k' => self.moveCursor(kb.KEY_UP),
+            'l' => self.moveCursor(kb.KEY_RIGHT),
             'v' => {
-                self.mode = Mode.visual;
+                self.mode = common.Mode.visual;
                 self.cur_buffer().sel_start.x = self.cur_buffer().rx;
                 self.cur_buffer().sel_start.y = self.cur_buffer().cy;
                 self.cur_buffer().sel_end.x = self.cur_buffer().rx + 1;
                 // Select 1 char.
                 self.cur_buffer().sel_end.y = self.cur_buffer().cy;
             },
-            'i' => self.mode = Mode.insert,
+            'i' => self.mode = common.Mode.insert,
             'a' => {
-                self.mode = Mode.insert;
-                self.moveCursor(kb.KEY_RIGHT, false);
+                self.mode = common.Mode.insert;
+                self.moveCursor(kb.KEY_RIGHT);
+            },
+            'o' => {
+                self.mode = common.Mode.insert;
+                self.moveCursor(kb.KEY_END);
+                try self.cur_buffer().insertNewLine();
             },
             's' => try self.save(),
             '/' => try self.search(true),
@@ -234,7 +234,7 @@ pub const Editor = struct {
             'x', kb.KEY_DEL => {
                 if (state.cy < state.len()) {
                     if (state.cx < state.rows.items[state.cy].content.len) {
-                        self.moveCursor(kb.KEY_RIGHT, false);
+                        self.moveCursor(kb.KEY_RIGHT);
                     }
                     try self.cur_buffer().delCharToLeft();
                 }
@@ -318,16 +318,16 @@ pub const Editor = struct {
                     try self.cur_buffer().insertChar(' ');
                 }
             },
-            kb.KEY_UP, kb.KEY_DOWN, kb.KEY_RIGHT, kb.KEY_LEFT => self.moveCursor(c, false),
+            kb.KEY_UP, kb.KEY_DOWN, kb.KEY_RIGHT, kb.KEY_LEFT => self.moveCursor(c),
             kb.KEY_BACKSPACE, kb.KEY_DEL, ctrlKey('h') => {
                 if (c == kb.KEY_DEL) {
                     // We should be joining the two rows in here in the insert mode.
                     if (state.cy < state.len()) {
                         if (state.cx == state.rows.items[state.cy].content.len) {
                             state.cx = 0;
-                            self.moveCursor(kb.KEY_DOWN, false);
+                            self.moveCursor(kb.KEY_DOWN);
                         } else {
-                            self.moveCursor(kb.KEY_RIGHT, false);
+                            self.moveCursor(kb.KEY_RIGHT);
                         }
                         try self.cur_buffer().delCharToLeft();
                     }
@@ -345,7 +345,7 @@ pub const Editor = struct {
                     }
                 }
                 for (0..state.screenrows) |_| {
-                    self.moveCursor(if (c == kb.KEY_PGUP) kb.KEY_UP else kb.KEY_DOWN, false);
+                    self.moveCursor(if (c == kb.KEY_PGUP) kb.KEY_UP else kb.KEY_DOWN);
                 }
             },
             ctrlKey('s') => try self.save(),
@@ -359,7 +359,7 @@ pub const Editor = struct {
             },
 
             ctrlKey('l'), '\x1b' => {
-                self.mode = Mode.normal;
+                self.mode = common.Mode.normal;
             },
             else => {
                 const casted_char = std.math.cast(u8, c) orelse return error.ValueTooBig;
@@ -376,15 +376,15 @@ pub const Editor = struct {
             // TODO: read about ctrl+l, is this an Esc?
             // It was in the tutorial, but I forgot.
             ctrlKey('l'), '\x1b' => {
-                self.mode = Mode.normal;
+                self.mode = common.Mode.normal;
                 self.cur_buffer().reset_sel();
             },
-            '0' => self.moveCursor(kb.KEY_HOME, true),
-            '$' => self.moveCursor(kb.KEY_END, true),
-            'h' => self.moveCursor(kb.KEY_LEFT, true),
-            'j' => self.moveCursor(kb.KEY_DOWN, true),
-            'k' => self.moveCursor(kb.KEY_UP, true),
-            'l' => self.moveCursor(kb.KEY_RIGHT, true),
+            '0' => self.moveCursor(kb.KEY_HOME),
+            '$' => self.moveCursor(kb.KEY_END),
+            'h' => self.moveCursor(kb.KEY_LEFT),
+            'j' => self.moveCursor(kb.KEY_DOWN),
+            'k' => self.moveCursor(kb.KEY_UP),
+            'l' => self.moveCursor(kb.KEY_RIGHT),
             'x', kb.KEY_DEL => {
                 //TODO: delete selection
             },
@@ -444,7 +444,7 @@ pub const Editor = struct {
         defer str_buf.deinit();
         try str_buf.append("\x1b[?25l");
         try str_buf.append("\x1b[H");
-        try self.cur_buffer().drawRows(str_buf);
+        try self.cur_buffer().drawRows(str_buf, self.mode == common.Mode.visual);
         try self.drawStatusBar(str_buf);
         try self.drawMessageBar(str_buf);
         var buf: [20]u8 = undefined;
