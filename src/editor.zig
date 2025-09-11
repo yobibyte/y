@@ -222,6 +222,10 @@ pub const Editor = struct {
                 self.cur_buffer().sel_end.y = self.cur_buffer().cy;
             },
             'i' => self.mode = Mode.insert,
+            'a' => {
+                self.mode = Mode.insert;
+                self.moveCursor(kb.KEY_RIGHT, false);
+            },
             's' => try self.save(),
             '/' => try self.search(true),
             'n' => try self.search(false),
