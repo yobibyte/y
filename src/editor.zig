@@ -226,6 +226,7 @@ pub const Editor = struct {
                 self.moveCursor(kb.KEY_END);
                 try self.cur_buffer().insertNewLine();
             },
+            'w' => self.cur_buffer().goToNextWord(),
             's' => try self.save(),
             '/' => try self.search(true),
             'n' => try self.search(false),

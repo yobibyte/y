@@ -313,6 +313,7 @@ pub const Buffer = struct {
                 }
             },
             kb.KEY_RIGHT => {
+                // Should we check -1 in insert here?
                 if (self.cy < self.len()) {
                     if (self.cx < self.rows.items[self.cy].content.len) {
                         self.cx += 1;
@@ -418,6 +419,40 @@ pub const Buffer = struct {
             }
             if (cur_idx == start_idx) {
                 break;
+            }
+        }
+    }
+
+    pub fn goToNextWord(self: *Buffer) void {
+        var prev_char: u8 = undefined;
+        var cur_char: u8 = undefined;
+        if (self.rows.items[self.cy].content.len > 0) {
+            prev_char = self.rows.items[self.cy].content[self.cx];
+            cur_char = self.rows.items[self.cy].content[self.cx];
+        } else {
+            prev_char = ' ';
+            cur_char = ' ';
+        }
+
+        while (true) {
+            if (self.cx + 2 <= self.rows.items[self.cy].content.len) {
+                self.cx += 1;
+            } else {
+                self.cx = 0;
+                self.cy += 1;
+                prev_char = ' ';
+            }
+            // FIXME if we have a row longer than screencols, we crash here.
+            if (self.cy == self.rows.items.len) {
+                self.cy -= 1;
+                return;
+            }
+            if (self.rows.items[self.cy].content.len > 0) {
+                cur_char = self.rows.items[self.cy].content[self.cx];
+                if (prev_char == ' ' and cur_char != ' ') {
+                    return;
+                }
+                prev_char = cur_char;
             }
         }
     }
