@@ -292,14 +292,41 @@ pub const Editor = struct {
         } else if (std.mem.eql(u8, cmd, "dd")) {
             self.cur_buffer().delRow(null);
         } else if (cmd.len > 2) {
-            const number = std.fmt.parseInt(usize, cmd[0 .. cmd.len - 2], 10) catch 0;
+            var number: usize = std.fmt.parseInt(usize, cmd[0 .. cmd.len - 2], 10) catch 0;
             if (number > 0 and std.mem.eql(u8, cmd[cmd.len - 2 ..], "gg")) {
                 // This check should be done on row side
                 if (number <= self.cur_buffer().len()) {
                     self.cur_buffer().cy = number - 1;
                 }
             } else {
-                return;
+                number = std.fmt.parseInt(usize, cmd[0 .. cmd.len - 1], 10) catch 0;
+                if (number > 0) {
+                    switch (cmd[cmd.len - 1]) {
+                        'h' => {
+                            for (0..number) |_| {
+                                self.moveCursor(kb.KEY_LEFT);
+                            }
+                        },
+                        'j' => {
+                            for (0..number) |_| {
+                                self.moveCursor(kb.KEY_DOWN);
+                            }
+                        },
+                        'k' => {
+                            for (0..number) |_| {
+                                self.moveCursor(kb.KEY_UP);
+                            }
+                        },
+                        'l' => {
+                            for (0..number) |_| {
+                                self.moveCursor(kb.KEY_RIGHT);
+                            }
+                        },
+                        else => return,
+                    }
+                } else {
+                    return;
+                }
             }
         } else {
             return;
