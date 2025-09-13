@@ -234,47 +234,48 @@ pub const Buffer = struct {
                 }
             } else {
                 const offset_row = self.rows.items[filerow].render;
-                var maxlen = offset_row.len - self.coloffset;
-                if (maxlen > self.screencols) {
-                    maxlen = self.screencols;
-                }
-
-                var crow_sel_start_rx: usize = 0;
-                var crow_sel_end_rx: usize = 0;
-                if (visual and self.sel_start.y <= filerow and filerow <= self.sel_end.y) {
-                    if (filerow == self.sel_start.y) {
-                        crow_sel_start_rx = self.sel_start.x;
-                        if (filerow < self.sel_end.y) {
+                if (offset_row.len > self.coloffset) {
+                    var maxlen = offset_row.len - self.coloffset;
+                    if (maxlen > self.screencols) {
+                        maxlen = self.screencols;
+                    }
+                    var crow_sel_start_rx: usize = 0;
+                    var crow_sel_end_rx: usize = 0;
+                    if (visual and self.sel_start.y <= filerow and filerow <= self.sel_end.y) {
+                        if (filerow == self.sel_start.y) {
+                            crow_sel_start_rx = self.sel_start.x;
+                            if (filerow < self.sel_end.y) {
+                                crow_sel_end_rx = self.coloffset + maxlen;
+                            }
+                        }
+                        if (filerow == self.sel_end.y) {
+                            crow_sel_end_rx = self.sel_end.x;
+                            if (crow_sel_end_rx > self.coloffset + maxlen) {
+                                crow_sel_end_rx = self.coloffset + maxlen;
+                            }
+                        }
+                        if (self.sel_start.y < filerow and filerow < self.sel_end.y) {
+                            crow_sel_start_rx = self.coloffset;
                             crow_sel_end_rx = self.coloffset + maxlen;
                         }
-                    }
-                    if (filerow == self.sel_end.y) {
-                        crow_sel_end_rx = self.sel_end.x;
-                        if (crow_sel_end_rx > self.coloffset + maxlen) {
-                            crow_sel_end_rx = self.coloffset + maxlen;
-                        }
-                    }
-                    if (self.sel_start.y < filerow and filerow < self.sel_end.y) {
-                        crow_sel_start_rx = self.coloffset;
-                        crow_sel_end_rx = self.coloffset + maxlen;
-                    }
 
-                    //TODO checks?
-                    try str_buffer.append(offset_row[self.coloffset..crow_sel_start_rx]);
-                    try str_buffer.append("\x1b[7m");
-                    if (maxlen == 0) {
-                        //TODO: simplify?
-                        try str_buffer.append(" ");
+                        //TODO checks?
+                        try str_buffer.append(offset_row[self.coloffset..crow_sel_start_rx]);
+                        try str_buffer.append("\x1b[7m");
+                        if (maxlen == 0) {
+                            //TODO: simplify?
+                            try str_buffer.append(" ");
+                        } else {
+                            if (offset_row.len >= self.coloffset) {
+                                try str_buffer.append(offset_row[crow_sel_start_rx..crow_sel_end_rx]);
+                            }
+                        }
+                        try str_buffer.append("\x1b[0m");
+                        try str_buffer.append(offset_row[crow_sel_end_rx .. self.coloffset + maxlen]);
                     } else {
                         if (offset_row.len >= self.coloffset) {
-                            try str_buffer.append(offset_row[crow_sel_start_rx..crow_sel_end_rx]);
+                            try str_buffer.append(offset_row[self.coloffset .. self.coloffset + maxlen]);
                         }
-                    }
-                    try str_buffer.append("\x1b[0m");
-                    try str_buffer.append(offset_row[crow_sel_end_rx .. self.coloffset + maxlen]);
-                } else {
-                    if (offset_row.len >= self.coloffset) {
-                        try str_buffer.append(offset_row[self.coloffset .. self.coloffset + maxlen]);
                     }
                 }
             }
@@ -447,6 +448,7 @@ pub const Buffer = struct {
                 self.cy -= 1;
                 return;
             }
+            // FIXME we do not stop at the end of the file but iterate on the last row circularly.
             if (self.rows.items[self.cy].content.len > 0) {
                 cur_char = self.rows.items[self.cy].content[self.cx];
                 if (prev_char == ' ' and cur_char != ' ') {
