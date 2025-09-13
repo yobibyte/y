@@ -8,7 +8,7 @@ install:
     cp zig-out/bin/y ~/.local/bin/cy
 
 lint:
-    zig fmt
+    zig fmt {{justfile_directory()}}/src
 
 lines:
     find src/ -type f ! -name '*.swp' -exec wc -l {} +

@@ -438,17 +438,13 @@ pub const Buffer = struct {
         while (true) {
             if (self.cx + 2 <= self.rows.items[self.cy].content.len) {
                 self.cx += 1;
-            } else {
+            } else if (self.cy != self.rows.items.len - 1) {
                 self.cx = 0;
                 self.cy += 1;
                 prev_char = ' ';
+            } else {
+                break;
             }
-            // FIXME if we have a row longer than screencols, we crash here.
-            if (self.cy == self.rows.items.len) {
-                self.cy -= 1;
-                return;
-            }
-            // FIXME we do not stop at the end of the file but iterate on the last row circularly.
             if (self.rows.items[self.cy].content.len > 0) {
                 cur_char = self.rows.items[self.cy].content[self.cx];
                 if (prev_char == ' ' and cur_char != ' ') {
