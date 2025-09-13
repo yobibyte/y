@@ -291,46 +291,40 @@ pub const Editor = struct {
             self.cur_buffer().cy = 0;
         } else if (std.mem.eql(u8, cmd, "dd")) {
             self.cur_buffer().delRow(null);
-        } else if (cmd.len > 2) {
-            var number: usize = std.fmt.parseInt(usize, cmd[0 .. cmd.len - 2], 10) catch 0;
-            if (number > 0 and std.mem.eql(u8, cmd[cmd.len - 2 ..], "gg")) {
-                // This check should be done on row side
-                if (number <= self.cur_buffer().len()) {
-                    self.cur_buffer().cy = number - 1;
+        } else {
+            var last_number_idx: usize = cmd.len;
+            for (0..cmd.len) |i| {
+                if (cmd[i] < '0' or cmd[i] > '9') {
+                    break;
+                }
+                last_number_idx = i;
+            }
+            // If all chars are digits, we skip.
+            if (last_number_idx < cmd.len - 1) {
+                const number: usize = try std.fmt.parseInt(usize, cmd[0 .. last_number_idx + 1], 10);
+                const unmod_cmd = cmd[last_number_idx + 1 ..];
+                if (last_number_idx == cmd.len - 3 and std.mem.eql(u8, unmod_cmd, "gg")) {
+                    // This check should be done on row side
+                    if (number <= self.cur_buffer().len()) {
+                        self.cur_buffer().cy = number - 1;
+                    }
+                } else if (last_number_idx == cmd.len - 2) {
+                    for (0..number) |_| {
+                        // Only one char left.
+                        switch (unmod_cmd[0]) {
+                            'h' => self.moveCursor(kb.KEY_LEFT),
+                            'j' => self.moveCursor(kb.KEY_DOWN),
+                            'k' => self.moveCursor(kb.KEY_UP),
+                            'l' => self.moveCursor(kb.KEY_RIGHT),
+                            else => return,
+                        }
+                    }
                 }
             } else {
-                number = std.fmt.parseInt(usize, cmd[0 .. cmd.len - 1], 10) catch 0;
-                if (number > 0) {
-                    switch (cmd[cmd.len - 1]) {
-                        'h' => {
-                            for (0..number) |_| {
-                                self.moveCursor(kb.KEY_LEFT);
-                            }
-                        },
-                        'j' => {
-                            for (0..number) |_| {
-                                self.moveCursor(kb.KEY_DOWN);
-                            }
-                        },
-                        'k' => {
-                            for (0..number) |_| {
-                                self.moveCursor(kb.KEY_UP);
-                            }
-                        },
-                        'l' => {
-                            for (0..number) |_| {
-                                self.moveCursor(kb.KEY_RIGHT);
-                            }
-                        },
-                        else => return,
-                    }
-                } else {
-                    return;
-                }
+                return;
             }
-        } else {
-            return;
         }
+
         self.cmd_buffer.clear();
     }
 
