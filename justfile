@@ -12,3 +12,6 @@ lint:
 
 lines:
     find src/ -type f ! -name '*.swp' -exec wc -l {} +
+
+test:
+    zig test {{justfile_directory()}}/test.zig
