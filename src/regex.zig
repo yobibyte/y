@@ -7,8 +7,8 @@ const std = @import("std");
 // Building it step by step:
 // ^ is beginning of a line.
 // . is any symbol.
-// --------WE ARE HERE------
 // $ end of a line.
+// --------WE ARE HERE------
 // * any number of a previous symbol.
 
 pub fn match(regex: []const u8, text: []const u8) bool {
@@ -30,6 +30,9 @@ pub fn matchHere(regex: []const u8, text: []const u8) bool {
     if (regex.len == 0) {
         return true;
     }
+    if (regex[0] == '$' and regex.len == 1) {
+        return text.len == 0;
+    }
     if (text.len > 0 and (regex[0] == '.' or regex[0] == text[0])) {
         return matchHere(regex[1..], text[1..]);
     }
@@ -40,6 +43,22 @@ test "match_no_special_chars" {
     try std.testing.expect(match("a", "a"));
 }
 
+test "match_no_special_chars_longer" {
+    try std.testing.expect(match("a", ";lkjfdas"));
+}
+
 test "no_match_no_special_chars" {
     try std.testing.expect(!match("a", "b"));
+}
+
+test "match_dot" {
+    try std.testing.expect(match("a.", "ab"));
+}
+
+test "match_end_of_line" {
+    try std.testing.expect(match("ab$", "asdfab"));
+}
+
+test "no_match_end_of_line" {
+    try std.testing.expect(!match("ab$", "abasdf"));
 }
