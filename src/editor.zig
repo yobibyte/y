@@ -303,7 +303,7 @@ pub const Editor = struct {
             if (last_number_idx < cmd.len - 1) {
                 const number: usize = try std.fmt.parseInt(usize, cmd[0 .. last_number_idx + 1], 10);
                 const unmod_cmd = cmd[last_number_idx + 1 ..];
-                if (last_number_idx == cmd.len - 3 and std.mem.eql(u8, unmod_cmd, "gg")) {
+                if (cmd.len > 2 and last_number_idx == cmd.len - 3 and std.mem.eql(u8, unmod_cmd, "gg")) {
                     // This check should be done on row side
                     if (number <= self.cur_buffer().len()) {
                         self.cur_buffer().cy = number - 1;

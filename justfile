@@ -7,7 +7,7 @@ run:
 install:
     cp zig-out/bin/y ~/.local/bin/cy
 
-lint:
+fmt:
     zig fmt {{justfile_directory()}}/src
 
 lines:

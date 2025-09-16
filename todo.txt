@@ -1,4 +1,3 @@
----------
 Copy/paste in visual mode, internal register only.
 ---------
 Forward/backward search.
