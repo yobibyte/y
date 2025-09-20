@@ -156,7 +156,7 @@ pub const Buffer = struct {
         self.dirty += 1;
     }
 
-    pub fn delRow(self: *Buffer, at: ?usize) void {
+    pub fn delRow(self: *Buffer, at: ?usize) ?*row.Row {
         var row_idx: usize = undefined;
         if (at) |idx| {
             row_idx = idx;
@@ -164,14 +164,14 @@ pub const Buffer = struct {
             row_idx = self.cy;
         }
         if (row_idx >= self.len()) {
-            return;
+            return null;
         }
         const crow = self.rows.orderedRemove(row_idx);
-        crow.deinit();
         if (row_idx == self.len()) {
             self.cy -= 1;
         }
         self.dirty += 1;
+        return crow;
     }
 
     pub fn commentLine(self: *Buffer) !void {
@@ -377,7 +377,11 @@ pub const Buffer = struct {
             self.cx = prev_row.content.len;
             // Join the two rows.
             try prev_row.append(self.rows.items[self.cy].content);
-            self.delRow(null); // Remove the current row
+            // TODO: does this break crow above?
+            const maybe_deleted_row = self.delRow(null); // Remove the current row
+            if (maybe_deleted_row) |deleted_row| {
+                deleted_row.deinit();
+            }
             self.cy -= 1; // Move cursor up.
         }
         try crow.*.update();

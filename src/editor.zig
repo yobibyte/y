@@ -67,6 +67,7 @@ pub const Editor = struct {
     search_pattern: ?[]const u8,
     cmd_buffer: *CommandBuffer,
     quit_flag: bool,
+    register: []u8,
 
     pub fn init(allocator: std.mem.Allocator) !*Editor {
         var self = try allocator.create(Editor);
@@ -88,6 +89,7 @@ pub const Editor = struct {
         self.mode = common.Mode.normal;
         self.statusmsg = "";
         self.statusmsg_time = 0;
+        self.register = "";
 
         self.search_pattern = null;
 
@@ -139,6 +141,7 @@ pub const Editor = struct {
         for (self.buffers.items) |buf| {
             buf.deinit();
         }
+        self.allocator.free(self.register);
         self.buffers.deinit();
         self.allocator.destroy(self);
     }
@@ -181,6 +184,16 @@ pub const Editor = struct {
         }
     }
 
+    fn paste(self: *Editor) !void {
+        var it = std.mem.splitScalar(u8, self.register, '\n');
+        const cbuf = self.cur_buffer();
+        while (it.next()) |line| {
+            try cbuf.insertRow(cbuf.cy + 1, "");
+            cbuf.cy += 1;
+            try cbuf.rows.items[cbuf.cy].append(line);
+        }
+    }
+
     fn processKeypressNormal(self: *Editor, c: u16) !void {
         // To be replace by current buffer.
         const state = self.cur_buffer();
@@ -208,6 +221,7 @@ pub const Editor = struct {
             'j' => self.moveCursor(kb.KEY_DOWN),
             'k' => self.moveCursor(kb.KEY_UP),
             'l' => self.moveCursor(kb.KEY_RIGHT),
+            'p' => try self.paste(),
             'v' => {
                 self.mode = common.Mode.visual;
                 self.cur_buffer().sel_start.x = self.cur_buffer().rx;
@@ -290,7 +304,14 @@ pub const Editor = struct {
             self.cur_buffer().cx = 0;
             self.cur_buffer().cy = 0;
         } else if (std.mem.eql(u8, cmd, "dd")) {
-            self.cur_buffer().delRow(null);
+            const maybe_row = self.cur_buffer().delRow(null);
+            if (maybe_row) |crow| {
+                // TODO: factor out to a method: update register.
+                self.allocator.free(self.register);
+                self.register = try self.allocator.alloc(u8, crow.content.len);
+                std.mem.copyForwards(u8, self.register[0..crow.content.len], crow.content);
+                crow.deinit();
+            }
         } else {
             var last_number_idx: usize = cmd.len;
             for (0..cmd.len) |i| {

@@ -104,7 +104,7 @@ pub const Row = struct {
         self.content = try self.allocator.realloc(self.content, rowlen - 1);
     }
 
-    pub fn append(self: *Row, chunk: []u8) !void {
+    pub fn append(self: *Row, chunk: []const u8) !void {
         const new_content = try self.allocator.alloc(u8, self.content.len + chunk.len);
         std.mem.copyForwards(u8, new_content[0..self.content.len], self.content);
         std.mem.copyForwards(u8, new_content[self.content.len..], chunk);
