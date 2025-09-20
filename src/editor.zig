@@ -303,6 +303,10 @@ pub const Editor = struct {
         if (std.mem.eql(u8, cmd, "gg")) {
             self.cur_buffer().cx = 0;
             self.cur_buffer().cy = 0;
+        } else if (std.mem.eql(u8, cmd, "yy")) {
+            const content = self.cur_buffer().rows.items[self.cur_buffer().cy].content;
+            self.register = try self.allocator.alloc(u8, content.len);
+            std.mem.copyForwards(u8, self.register[0..content.len], content);
         } else if (std.mem.eql(u8, cmd, "dd")) {
             const maybe_row = self.cur_buffer().delRow(null);
             if (maybe_row) |crow| {
