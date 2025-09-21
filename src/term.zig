@@ -31,3 +31,28 @@ fn getCursorPosition(writer: *const std.fs.File) ![2]usize {
 
     return .{ rows, cols };
 }
+
+pub fn enableRawMode(handle: posix.fd_t) !posix.system.termios {
+    const orig_term = try posix.tcgetattr(handle);
+    var cterm = orig_term;
+    cterm.lflag.ECHO = !cterm.lflag.ECHO;
+    cterm.lflag.ISIG = !cterm.lflag.ISIG;
+    cterm.lflag.ICANON = !cterm.lflag.ICANON;
+    cterm.lflag.IEXTEN = !cterm.lflag.IEXTEN;
+    cterm.iflag.IXON = !cterm.iflag.IXON;
+    cterm.iflag.ICRNL = !cterm.iflag.ICRNL;
+    cterm.iflag.BRKINT = !cterm.iflag.BRKINT;
+    cterm.iflag.INPCK = !cterm.iflag.INPCK;
+    cterm.iflag.ISTRIP = !cterm.iflag.ISTRIP;
+    cterm.oflag.OPOST = !cterm.oflag.OPOST;
+    cterm.cflag.CSIZE = posix.CSIZE.CS8;
+    cterm.cc[@intFromEnum(posix.V.MIN)] = 0;
+    cterm.cc[@intFromEnum(posix.V.TIME)] = 1;
+    try posix.tcsetattr(handle, .NOW, cterm);
+    return orig_term;
+}
+
+pub fn disableRawMode(orig_term: posix.system.termios, handle: posix.fd_t, writer: *const std.fs.File) !void {
+    try writer.writeAll("\x1b[H\x1b[2J");
+    try posix.tcsetattr(handle, .NOW, orig_term);
+}

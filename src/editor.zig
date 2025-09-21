@@ -1,5 +1,4 @@
 const std = @import("std");
-const main = @import("main.zig");
 const row = @import("row.zig");
 const str = @import("string.zig");
 const buffer = @import("buffer.zig");
@@ -94,7 +93,7 @@ pub const Editor = struct {
         self.search_pattern = null;
 
         self.cur_buffer_idx = undefined;
-        try self.enableRawMode(self.handle);
+        self.orig_term = try term.enableRawMode(self.handle);
 
         self.buffers = std.array_list.Managed(*buffer.Buffer).init(allocator);
         self.cmd_buffer = try CommandBuffer.init(self.allocator);
@@ -102,35 +101,8 @@ pub const Editor = struct {
         return self;
     }
 
-    fn enableRawMode(self: *Editor, handle: posix.fd_t) !void {
-        //TODO: move to term.zig
-        self.orig_term = try posix.tcgetattr(handle);
-        var cterm = self.orig_term;
-        cterm.lflag.ECHO = !cterm.lflag.ECHO;
-        cterm.lflag.ISIG = !cterm.lflag.ISIG;
-        cterm.lflag.ICANON = !cterm.lflag.ICANON;
-        cterm.lflag.IEXTEN = !cterm.lflag.IEXTEN;
-        cterm.iflag.IXON = !cterm.iflag.IXON;
-        cterm.iflag.ICRNL = !cterm.iflag.ICRNL;
-        cterm.iflag.BRKINT = !cterm.iflag.BRKINT;
-        cterm.iflag.INPCK = !cterm.iflag.INPCK;
-        cterm.iflag.ISTRIP = !cterm.iflag.ISTRIP;
-        cterm.oflag.OPOST = !cterm.oflag.OPOST;
-        cterm.cflag.CSIZE = posix.CSIZE.CS8;
-        cterm.cc[@intFromEnum(posix.V.MIN)] = 0;
-        cterm.cc[@intFromEnum(posix.V.TIME)] = 1;
-        try posix.tcsetattr(handle, .NOW, cterm);
-    }
-
-    pub fn disableRawMode(self: *Editor, handle: posix.fd_t, writer: *const std.fs.File) !void {
-        //TODO: move to term.zig
-        // Clear screen and move cursort to the top left.
-        try writer.writeAll("\x1b[H\x1b[2J");
-        try posix.tcsetattr(handle, .NOW, self.orig_term);
-    }
-
     pub fn deinit(self: *Editor) void {
-        self.disableRawMode(self.handle, &self.stdout) catch |err| {
+        term.disableRawMode(self.orig_term, self.handle, &self.stdout) catch |err| {
             std.debug.print("Failed to restore the original terminal mode: {}", .{err});
         };
         self.allocator.free(self.statusmsg);
