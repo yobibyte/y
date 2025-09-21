@@ -2,7 +2,7 @@ const std = @import("std");
 const row = @import("row.zig");
 const main = @import("main.zig");
 const config = @import("config.zig");
-const str = @import("string.zig");
+const str = @import("lib/ylib/string.zig");
 const kb = @import("kb.zig");
 const common = @import("common.zig");
 

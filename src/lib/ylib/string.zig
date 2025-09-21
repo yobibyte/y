@@ -42,3 +42,18 @@ pub const String = struct {
         self.allocator.destroy(self);
     }
 };
+
+test "append" {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer switch(gpa.deinit()) {
+        .leak => std.debug.panic("We are leaking!", .{}),
+        .ok => {},
+    };
+    const allocator = gpa.allocator();
+    const x = try String.init(2, allocator);
+    try x.append("a");
+    try x.append("b");
+    try std.testing.expect(x.len==2);
+    try std.testing.expect(std.mem.eql(u8, x.content(), "ab"));
+    defer x.deinit();
+}
