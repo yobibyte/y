@@ -1,0 +1,27 @@
+#!/bin/bash
+
+# I got rid of the just dependency to simplify.
+# Using a bash script is enough for my purposes.
+
+build() {
+    zig build-exe src/main.zig -O ReleaseFast -femit-bin=zig-out/bin/fastprog
+}
+
+if [ $1 == "build" ]; then
+    build
+elif [ $1 == "debug" ]; then
+    zig build
+elif [ $1 == "run" ]; then
+    zig build run
+elif [ $1 == "fmt" ]; then
+    zig fmt src
+elif [ $1 == "lines" ]; then
+    find src/ -type f ! -name '*.swp' -exec wc -l {} +
+elif [ $1 == "test" ]; then
+    zig test test.zig
+elif [ $1 == "install" ]; then
+    build
+    cp zig-out/bin/y ~/.local/bin/y
+else
+    echo Unknown argument $1
+fi
