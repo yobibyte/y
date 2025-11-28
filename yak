@@ -3,8 +3,9 @@
 # I got rid of the just dependency to simplify.
 # Using a bash script is enough for my purposes.
 
+# TODO: Figure out why this build crashes because of zon_mod.
 build() {
-    zig build-exe src/main.zig -O ReleaseFast -femit-bin=zig-out/bin/fastprog
+   zig build -Doptimize=ReleaseFast 
 }
 
 if [ $1 == "build" ]; then
