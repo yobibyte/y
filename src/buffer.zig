@@ -146,6 +146,7 @@ pub const Buffer = struct {
         self.allocator.destroy(self);
     }
 
+    /// Insert row to the buffer.
     pub fn insertRow(self: *Buffer, at: usize, line: []u8) !void {
         if (at > self.len()) {
             return;
@@ -156,6 +157,7 @@ pub const Buffer = struct {
         self.dirty += 1;
     }
 
+    /// Delete row from the buffer.
     pub fn delRow(self: *Buffer, at: ?usize) ?*row.Row {
         var row_idx: usize = undefined;
         if (at) |idx| {
@@ -346,6 +348,8 @@ pub const Buffer = struct {
 
     pub fn setCommentChars(self: *Buffer) void {
         const fname = self.filename orelse return;
+        // TODO: add more extensions.
+        // TODO: do we need endswith or we can just check the slice end?
         if (std.mem.endsWith(u8, fname, ".py")) {
             self.comment_chars = "#";
         }
