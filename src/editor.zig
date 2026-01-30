@@ -156,13 +156,17 @@ pub const Editor = struct {
         }
     }
 
-    fn paste(self: *Editor) !void {
+    fn pasteAfter(self: *Editor) !void {
         var it = std.mem.splitScalar(u8, self.register, '\n');
         const cbuf = self.cur_buffer();
         while (it.next()) |line| {
-            try cbuf.insertRow(cbuf.cy + 1, "");
-            cbuf.cy += 1;
+            // TODO: to paste not only full lines, instead of append, we should add at an index.
+            // TODO: we should also keep track of the cx index and do row.update()
             try cbuf.rows.items[cbuf.cy].append(line);
+            if (it.peek()) |_| {
+                try cbuf.insertRow(cbuf.cy + 1, "");
+                cbuf.cy += 1;
+            }
         }
     }
 
@@ -191,9 +195,10 @@ pub const Editor = struct {
             '$' => self.moveCursor(kb.KEY_END),
             'h' => self.moveCursor(kb.KEY_LEFT),
             'j' => self.moveCursor(kb.KEY_DOWN),
+            'c' => try self.cur_buffer().commentLine(),
             'k' => self.moveCursor(kb.KEY_UP),
             'l' => self.moveCursor(kb.KEY_RIGHT),
-            'p' => try self.paste(),
+            'p' => try self.pasteAfter(),
             'v' => {
                 self.mode = common.Mode.visual;
                 self.cur_buffer().sel_start.x = self.cur_buffer().rx;
@@ -284,8 +289,9 @@ pub const Editor = struct {
             if (maybe_row) |crow| {
                 // TODO: factor out to a method: update register.
                 self.allocator.free(self.register);
-                self.register = try self.allocator.alloc(u8, crow.content.len);
-                std.mem.copyForwards(u8, self.register[0..crow.content.len], crow.content);
+                self.register = try self.allocator.alloc(u8, crow.content.len + 1);
+                self.register[0] = '\n';
+                std.mem.copyForwards(u8, self.register[1 .. crow.content.len + 1], crow.content);
                 crow.deinit();
             }
         } else {
@@ -405,7 +411,98 @@ pub const Editor = struct {
             'k' => self.moveCursor(kb.KEY_UP),
             'l' => self.moveCursor(kb.KEY_RIGHT),
             'x', kb.KEY_DEL => {
-                //TODO: delete selection
+                var cbuf = self.cur_buffer();
+                //TODO: I think most of this code should be moved to buffer.zig.
+                const ss = cbuf.sel_start;
+                const se = cbuf.sel_end;
+                // TODO: this should be var, because we will iterate over row_idx.
+                // until se.y if we do not remove rows
+                var to_clipboard = try str.String.init(80, self.allocator);
+                defer to_clipboard.deinit();
+                // TODO fix the removing properly
+
+                if (ss.y == se.y) {
+                    // We are within one line only.
+                    if (ss.x == se.x) {
+                        // Removing all chars on a line = removing a whole row.
+                        const maybe_row = self.cur_buffer().delRow(null);
+                        if (maybe_row) |crow| {
+                            try to_clipboard.append(crow.content);
+                            try to_clipboard.append("\n");
+                            crow.deinit();
+                            cbuf.dirty += 1;
+                        }
+                        //TODO: remove dirty+=1 from every line? Make a single one per function?
+                    } else {
+                        try to_clipboard.append(cbuf.rows.items[ss.y].content[ss.x..se.x]);
+                        for (ss.x..se.x) |_| {
+                            // Everything contracts to the left, that's why we remove at the same pos.
+                            try cbuf.rows.items[ss.y].delChar(ss.x);
+                            cbuf.dirty += 1;
+                        }
+                    }
+                    try cbuf.rows.items[ss.y].update();
+                } else {
+                    // multi-row delete logic
+                    for (ss.y..se.y) |row_idx| {
+                        const pre_change_row_len = cbuf.rows.items[row_idx].content.len;
+                        std.debug.print("rlen {} ssx {}, ss.y {}, row_idx {}.", .{ pre_change_row_len, ss.x, ss.y, row_idx });
+                        if (ss.y == row_idx) {
+                            // First row of the selection.
+                            // Remove post x.
+                            // if starting at the beginning of the line,
+                            // remove the whole row
+                            if (ss.x == 0) {
+                                try cbuf.rows.items[ss.y].delChar(ss.x);
+                                cbuf.dirty += 1;
+                                const maybe_row = self.cur_buffer().delRow(null);
+                                if (maybe_row) |crow| {
+                                    try to_clipboard.append(crow.content);
+                                    crow.deinit();
+                                }
+                            } else {
+                                // TODO: make a function in buffer or row?
+                                //std.debug.assert(false);
+                                for (ss.x..pre_change_row_len) |_| {
+                                    self.moveCursor(kb.KEY_RIGHT);
+                                    //BOOKMARK: start here, replace delChar with delCharToLeft, set buf cx before
+                                    try cbuf.delCharToLeft();
+                                }
+                            }
+                            try cbuf.rows.items[row_idx].update();
+                        } else if (se.y == row_idx) {
+                            // Last row of the selection.
+                            // Remove pre x.
+                            // if se.y is the last symbol, remove the whole row
+                            if (se.x == pre_change_row_len) {
+                                const maybe_row = self.cur_buffer().delRow(null);
+                                if (maybe_row) |crow| {
+                                    try to_clipboard.append(crow.content);
+                                    crow.deinit();
+                                }
+                            } else {
+                                for (0..se.x) |_| {
+                                    // Everything contracts to the left, that's why we remove at the same pos.
+                                    try cbuf.rows.items[row_idx].delChar(0);
+                                }
+                            }
+                            try cbuf.rows.items[row_idx].update();
+                        } else {
+                            const maybe_row = self.cur_buffer().delRow(null);
+                            if (maybe_row) |crow| {
+                                try to_clipboard.append(crow.content);
+                                crow.deinit();
+                            }
+                        }
+                    }
+                }
+                // After all the modifications, the cursor should go to sel_start pos.
+                cbuf.cx = ss.x;
+                cbuf.cy = ss.y;
+                self.allocator.free(self.register);
+                self.register = try self.allocator.alloc(u8, to_clipboard.content().len);
+                std.mem.copyForwards(u8, self.register[0..self.register.len], to_clipboard.content());
+                self.mode = common.Mode.normal;
             },
             else => {},
         }
