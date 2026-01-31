@@ -8,21 +8,19 @@ build() {
    zig build -Doptimize=ReleaseFast 
 }
 
-if [ $1 == "build" ]; then
-    build
-elif [ $1 == "debug" ]; then
-    zig build
-elif [ $1 == "run" ]; then
-    zig build run
-elif [ $1 == "fmt" ]; then
-    zig fmt src
-elif [ $1 == "lines" ]; then
-    find src/ -type f ! -name '*.swp' -exec wc -l {} +
-elif [ $1 == "test" ]; then
-    zig test test.zig
-elif [ $1 == "install" ]; then
-    build
-    cp zig-out/bin/y ~/.local/bin/y
-else
-    echo Unknown argument $1
-fi
+case "$1" in
+    build) build;;
+    debug) build;;
+    run) zig build run -- "${@:2}";;
+    fmt) zig fmt src;;
+    lines) find src/ -type f ! -name '*.swp' -exec wc -l {} +;;
+    test) zig test test.zig;;
+    install)
+        build
+        cp zig-out/bin/y ~/.local/bin/y
+        ;;
+    *)
+        echo Unknown argument "$1"
+        exit 1
+        ;;
+esac
