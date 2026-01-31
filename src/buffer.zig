@@ -169,9 +169,7 @@ pub const Buffer = struct {
             return null;
         }
         const crow = self.rows.orderedRemove(row_idx);
-        if (row_idx == self.len()) {
-            self.cy -= 1;
-        }
+        self.cy -= 1;
         self.dirty += 1;
         return crow;
     }
@@ -364,6 +362,7 @@ pub const Buffer = struct {
     }
 
     pub fn delCharToLeft(self: *Buffer) !void {
+        // In insert mode, we can move to a not-yet existing row.
         if (self.cy == self.len()) {
             return;
         }
@@ -375,20 +374,28 @@ pub const Buffer = struct {
         if (self.cx > 0) {
             try crow.*.delChar(self.cx - 1);
             self.cx -= 1;
+            try crow.*.update();
         } else {
             // Move cursor to the joint of two new rows.
+            // Imagine this is our file:
+            // 123
+            // 456
+            // We are at 4.
             var prev_row = self.rows.items[self.cy - 1];
             self.cx = prev_row.content.len;
             // Join the two rows.
             try prev_row.append(self.rows.items[self.cy].content);
-            // TODO: does this break crow above?
+            // 123456
+            // 456
+            // File is like that rn ^^^.
             const maybe_deleted_row = self.delRow(null); // Remove the current row
             if (maybe_deleted_row) |deleted_row| {
                 deleted_row.deinit();
             }
-            self.cy -= 1; // Move cursor up.
+            // TODO: think what if this is on the ephemeral last row?
+            // We should make the last row real.
+            try self.rows.items[self.cy].update();
         }
-        try crow.*.update();
         self.dirty += 1;
     }
 
