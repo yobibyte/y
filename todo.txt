@@ -1,7 +1,7 @@
 ---------
 add a debugging method to print to status line
 ---------
-Copy/paste in visual mode, internal register only.
+Paste from internal registers.
 ---------
 Forward/backward search.
 ---------
