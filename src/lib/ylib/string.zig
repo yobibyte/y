@@ -1,5 +1,6 @@
 const std = @import("std");
 
+//TODO: write from([]const u8) method.
 pub const String = struct {
     data: []u8,
     allocator: std.mem.Allocator,
@@ -13,6 +14,10 @@ pub const String = struct {
         self.data = try self.allocator.alloc(u8, size);
         self.len = 0; // We allocate memory, but do not fill it yet.
         return self;
+    }
+
+    pub fn clear(self: *String) void {
+        self.len = 0;
     }
 
     pub fn append(self: *String, other: []const u8) !void {
@@ -41,19 +46,57 @@ pub const String = struct {
         self.allocator.free(self.data);
         self.allocator.destroy(self);
     }
+
+    pub fn revert(self: *String) void {
+        var tmp: u8 = undefined;
+        const len = self.len;
+        if (len == 0) {
+            return;
+        }
+        for (0..len / 2) |i| {
+            tmp = self.data[i];
+            self.data[i] = self.data[len - 1 - i];
+            self.data[len - 1 - i] = tmp;
+        }
+    }
 };
 
 test "append" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer switch (gpa.deinit()) {
-        .leak => std.debug.panic("We are leaking!", .{}),
-        .ok => {},
-    };
-    const allocator = gpa.allocator();
+    const allocator = std.testing.allocator;
     const x = try String.init(2, allocator);
+    defer x.deinit();
     try x.append("a");
     try x.append("b");
     try std.testing.expect(x.len == 2);
     try std.testing.expect(std.mem.eql(u8, x.content(), "ab"));
+}
+
+test "clear" {
+    const allocator = std.testing.allocator;
+    const x = try String.init(2, allocator);
     defer x.deinit();
+    try x.append("42");
+    x.clear();
+    try std.testing.expect(x.len == 0);
+    try std.testing.expect(std.mem.eql(u8, x.content(), ""));
+}
+
+test "revert" {
+    const allocator = std.testing.allocator;
+    const x = try String.init(2, allocator);
+    defer x.deinit();
+    x.revert();
+    try std.testing.expect(x.len == 0);
+
+    // Test odd number of chars.
+    try x.append("123");
+    x.revert();
+    try std.testing.expect(std.mem.eql(u8, x.content(), "321"));
+    x.clear();
+
+    // Test even number of chars.
+    try x.append("1234");
+    x.revert();
+    try std.testing.expect(std.mem.eql(u8, x.content(), "4321"));
+    x.clear();
 }
