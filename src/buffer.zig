@@ -169,7 +169,9 @@ pub const Buffer = struct {
             return null;
         }
         const crow = self.rows.orderedRemove(row_idx);
-        self.cy -= 1;
+        if (self.cy > 0) {
+            self.cy -= 1;
+        }
         self.dirty += 1;
         return crow;
     }
