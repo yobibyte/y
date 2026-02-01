@@ -43,7 +43,7 @@ pub const String = struct {
     }
 
     /// Initialise from a u8 slice.
-    pub fn from_slice(chars: []const u8, allocator: std.mem.Allocator) !*String {
+    pub fn fromSlice(chars: []const u8, allocator: std.mem.Allocator) !*String {
         var self = try String.init(chars.len, allocator);
         try self.append(chars);
         return self;
@@ -84,7 +84,7 @@ test "append" {
 
 test "clear" {
     const allocator = std.testing.allocator;
-    const x = try String.from_slice("42", allocator);
+    const x = try String.fromSlice("42", allocator);
     defer x.deinit();
     x.clear();
     try std.testing.expect(x.len == 0);
