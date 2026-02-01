@@ -38,6 +38,7 @@ I am here to have fun and learn.
 - [x] Visual mode.
 - [x] Tab expansion, controlling tabwidth.
 - [x] Multiple buffers.
+- [x] Copy/Paste with internal registers.
 - [ ] Undo.
 - [ ] Replace mode.
 - [ ] Search and Replace.
