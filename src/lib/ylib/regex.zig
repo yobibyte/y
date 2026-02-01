@@ -8,23 +8,42 @@ const std = @import("std");
 // ^ is beginning of a line.
 // . is any symbol.
 // $ end of a line.
-// --------WE ARE HERE------
-// \d any digit
+// % any digit
 // * any number of a previous symbol.
 
-// TODO: add escape characters!
+// TODO: add escape characters! Replace % with \d.
 
 pub fn match(regex: []const u8, text: []const u8) bool {
     // I consider empty regex non-matchable.
     if (regex.len > 0) {
         if (regex[0] == '^') {
-            return match(regex[1..], text);
+            return matchHere(regex[1..], text);
         }
         for (0..text.len) |start| {
             if (matchHere(regex, text[start..])) {
                 return true;
             }
         }
+    }
+    return false;
+}
+
+pub fn matchZeroOrMore(char: u8, regex: []const u8, text: []const u8) bool {
+    for (0..text.len) |start| {
+        if (matchHere(regex, text[start..])) {
+            return true;
+        }
+        if (!charMatch(char, text[start])) {
+            break;
+        }
+    }
+
+    return false;
+}
+
+pub fn charMatch(regexchar: u8, textchar: u8) bool {
+    if (regexchar == '.' or regexchar == textchar or (regexchar == '%' and std.ascii.isDigit(textchar))) {
+        return true;
     }
     return false;
 }
@@ -36,7 +55,11 @@ pub fn matchHere(regex: []const u8, text: []const u8) bool {
     if (regex[0] == '$' and regex.len == 1) {
         return text.len == 0;
     }
-    if (text.len > 0 and (regex[0] == '.' or regex[0] == text[0] or (regex[0] == '%' and std.ascii.isDigit(text[0])))) {
+    // * means match zero or more occurrences of the preceding symbol.
+    if (regex.len > 1 and regex[1] == '*') {
+        return matchZeroOrMore(regex[0], regex[2..], text);
+    }
+    if (text.len > 0 and charMatch(regex[0], text[0])) {
         return matchHere(regex[1..], text[1..]);
     }
     return false;
@@ -76,4 +99,36 @@ test "match_digit" {
 
 test "match_multi_digit" {
     try std.testing.expect(match("a%%b", "a32b"));
+}
+
+test "match_wildcard" {
+    try std.testing.expect(match("a*", "aa"));
+}
+
+test "no_match_wildcard" {
+    try std.testing.expect(match("a*", "aab"));
+}
+
+test "match_wildcard_in_the_middle" {
+    try std.testing.expect(match("a*b", "aab"));
+}
+
+test "match_wildcard_with_dot" {
+    try std.testing.expect(match(".*b", "12345b"));
+}
+
+test "match_any_number_of_digits" {
+    try std.testing.expect(match("%*", "12345"));
+}
+
+test "match_substr" {
+    try std.testing.expect(match("abc", "ddabc"));
+}
+
+test "no_match_substr_line_start" {
+    try std.testing.expect(!match("^abc", "ddabc"));
+}
+
+test "match_substr_line_start" {
+    try std.testing.expect(match("^abc", "abcdd"));
 }
