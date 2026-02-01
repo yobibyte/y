@@ -265,7 +265,6 @@ pub const Buffer = struct {
                         try str_buffer.append(offset_row[self.coloffset..crow_sel_start_rx]);
                         try str_buffer.append("\x1b[7m");
                         if (maxlen == 0) {
-                            //TODO: simplify?
                             try str_buffer.append(" ");
                         } else {
                             if (offset_row.len >= self.coloffset) {
@@ -281,8 +280,7 @@ pub const Buffer = struct {
                     }
                 }
             }
-            try str_buffer.append("\x1b[K");
-            try str_buffer.append("\r\n");
+            try str_buffer.append("\x1b[K\r\n");
         }
     }
 
@@ -360,8 +358,6 @@ pub const Buffer = struct {
 
     pub fn setCommentChars(self: *Buffer) void {
         const fname = self.filename orelse return;
-        // TODO: add more extensions.
-        // TODO: do we need endswith or we can just check the slice end?
         if (std.mem.endsWith(u8, fname, ".py")) {
             self.comment_chars = "#";
         }

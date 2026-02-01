@@ -125,6 +125,13 @@ pub const Editor = struct {
         self.allocator.destroy(self);
     }
 
+    fn put_to_register(self: *Editor, content: []u8, mode: RegisterMode) !void {
+        self.allocator.free(self.register);
+        self.register = try self.allocator.alloc(u8, content.len);
+        std.mem.copyForwards(u8, self.register[0..content.len], content);
+        self.register_mode = mode;
+    }
+
     pub fn add_buffer(self: *Editor, maybe_fname: ?[]const u8) !void {
         const newbuf = try buffer.Buffer.init(self.allocator, self.screenrows, self.screencols, maybe_fname);
         try self.buffers.insert(self.buffers.items.len, newbuf);
@@ -288,12 +295,8 @@ pub const Editor = struct {
         } else if (std.mem.eql(u8, cmd, "dd")) {
             const maybe_row = self.cur_buffer().delRow(null);
             if (maybe_row) |crow| {
-                // TODO: factor out to a method: update register.
-                self.allocator.free(self.register);
-                self.register = try self.allocator.alloc(u8, crow.content.len);
-                std.mem.copyForwards(u8, self.register[0..crow.content.len], crow.content);
+                try self.put_to_register(crow.content, RegisterMode.full);
                 crow.deinit();
-                self.register_mode = RegisterMode.full;
             }
         } else {
             var last_number_idx: usize = cmd.len;
@@ -399,8 +402,6 @@ pub const Editor = struct {
     fn processKeypressVisual(self: *Editor, c: u16) !void {
         switch (c) {
             0 => {}, // 0 is EndOfStream.
-            // TODO: read about ctrl+l, is this an Esc?
-            // It was in the tutorial, but I forgot.
             ctrlKey('l'), '\x1b' => {
                 self.mode = common.Mode.normal;
                 self.cur_buffer().reset_sel();
@@ -433,11 +434,7 @@ pub const Editor = struct {
                     }
                 }
                 to_clipboard.revert();
-
-                self.allocator.free(self.register);
-                self.register = try self.allocator.alloc(u8, to_clipboard.content().len);
-                std.mem.copyForwards(u8, self.register[0..self.register.len], to_clipboard.content());
-                self.register_mode = RegisterMode.truncated;
+                try self.put_to_register(to_clipboard.content(), RegisterMode.truncated);
             },
             else => {},
         }
