@@ -40,6 +40,7 @@ I am here to have fun and learn.
 - [x] Multiple buffers.
 - [x] Copy/Paste with internal registers.
 - [ ] Undo.
+- [ ] Utf8 support.
 - [ ] Replace mode.
 - [ ] Search and Replace.
 - [ ] Regex engine.
@@ -47,7 +48,6 @@ I am here to have fun and learn.
 - [ ] An ability to run a bash command from the editor.
 - [ ] An ability to pipe the output from above to an open buffer (or create a buffer with it).
 - [ ] Line wrapping.
-- [ ] Utf8 support.
 - [ ] Using system's clipboard (vim.o.clipboard = "unnamedplus").
 - [ ] Quickfix list.
 - [ ] Vertical/horizontal splits.

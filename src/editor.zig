@@ -549,7 +549,6 @@ pub const Editor = struct {
         }
     }
 
-    // TODO: This should prob be on the buffer level.
     fn save(self: *Editor) !void {
         if (self.cur_buffer().filename == null) {
             const prompt = try self.get_prompt("Save as: ");
@@ -576,6 +575,7 @@ pub const Editor = struct {
             try self.setStatusMessage(success_msg);
             self.cur_buffer().dirty = 0;
         } else {
+            // We get here if we press Esc at the save prompt when there is no filename.
             try self.setStatusMessage("Save aborted.");
             return;
         }
