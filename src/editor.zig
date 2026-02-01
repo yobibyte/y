@@ -48,6 +48,11 @@ pub const CommandBuffer = struct {
     }
 };
 
+pub const RegisterMode = enum {
+    full,
+    truncated,
+};
+
 pub const Editor = struct {
     allocator: std.mem.Allocator,
     stdin: std.fs.File,
@@ -67,6 +72,7 @@ pub const Editor = struct {
     cmd_buffer: *CommandBuffer,
     quit_flag: bool,
     register: []u8,
+    register_mode: RegisterMode,
 
     pub fn init(allocator: std.mem.Allocator) !*Editor {
         var self = try allocator.create(Editor);
@@ -89,6 +95,7 @@ pub const Editor = struct {
         self.statusmsg = "";
         self.statusmsg_time = 0;
         self.register = "";
+        self.register_mode = RegisterMode.full;
 
         self.search_pattern = null;
 
@@ -156,22 +163,6 @@ pub const Editor = struct {
         }
     }
 
-    fn pasteAfter(self: *Editor) !void {
-        // TODO: think how to implement this to distinguish between pasting after yy (full lines),
-        // and pasting after visual selection.
-        var it = std.mem.splitScalar(u8, self.register, '\n');
-        const cbuf = self.cur_buffer();
-        while (it.next()) |line| {
-            // TODO: to paste not only full lines, instead of append, we should add at an index.
-            // TODO: we should also keep track of the cx index and do row.update()
-            try cbuf.rows.items[cbuf.cy].append(line);
-            if (it.peek()) |_| {
-                try cbuf.insertRow(cbuf.cy + 1, "");
-                cbuf.cy += 1;
-            }
-        }
-    }
-
     fn processKeypressNormal(self: *Editor, c: u16) !void {
         // To be replace by current buffer.
         const state = self.cur_buffer();
@@ -200,7 +191,14 @@ pub const Editor = struct {
             'c' => try self.cur_buffer().commentLine(),
             'k' => self.moveCursor(kb.KEY_UP),
             'l' => self.moveCursor(kb.KEY_RIGHT),
-            'p' => try self.pasteAfter(),
+            'p' => {
+                switch (self.register_mode) {
+                    RegisterMode.full => try self.cur_buffer().pasteFull(self.register),
+                    RegisterMode.truncated => {
+                        try self.cur_buffer().pasteTruncated(self.register);
+                    },
+                }
+            },
             'v' => {
                 self.mode = common.Mode.visual;
                 self.cur_buffer().sel_start.x = self.cur_buffer().rx;
@@ -214,7 +212,6 @@ pub const Editor = struct {
                 self.mode = common.Mode.insert;
                 self.moveCursor(kb.KEY_RIGHT);
             },
-            // TODO: In normal mode, we can move to the row.len char. We should not.
             'o' => {
                 self.mode = common.Mode.insert;
                 self.moveCursor(kb.KEY_END);
@@ -287,15 +284,16 @@ pub const Editor = struct {
             const content = self.cur_buffer().rows.items[self.cur_buffer().cy].content;
             self.register = try self.allocator.alloc(u8, content.len);
             std.mem.copyForwards(u8, self.register[0..content.len], content);
+            self.register_mode = RegisterMode.full;
         } else if (std.mem.eql(u8, cmd, "dd")) {
             const maybe_row = self.cur_buffer().delRow(null);
             if (maybe_row) |crow| {
                 // TODO: factor out to a method: update register.
                 self.allocator.free(self.register);
-                self.register = try self.allocator.alloc(u8, crow.content.len + 1);
-                self.register[0] = '\n';
-                std.mem.copyForwards(u8, self.register[1 .. crow.content.len + 1], crow.content);
+                self.register = try self.allocator.alloc(u8, crow.content.len);
+                std.mem.copyForwards(u8, self.register[0..crow.content.len], crow.content);
                 crow.deinit();
+                self.register_mode = RegisterMode.full;
             }
         } else {
             var last_number_idx: usize = cmd.len;
@@ -439,6 +437,7 @@ pub const Editor = struct {
                 self.allocator.free(self.register);
                 self.register = try self.allocator.alloc(u8, to_clipboard.content().len);
                 std.mem.copyForwards(u8, self.register[0..self.register.len], to_clipboard.content());
+                self.register_mode = RegisterMode.truncated;
             },
             else => {},
         }

@@ -471,4 +471,45 @@ pub const Buffer = struct {
             }
         }
     }
+
+    /// Paste copied lines starting from newline.
+    /// This behaviour is used, e.g. after yy.
+    pub fn pasteFull(self: *Buffer, register: []u8) !void {
+        var it = std.mem.splitScalar(u8, register, '\n');
+        while (it.next()) |line| {
+            try self.insertRow(self.cy + 1, "");
+            self.cy += 1;
+            try self.rows.items[self.cy].append(line);
+        }
+    }
+
+    // Paste right after the current cursor position. We behave like this after visual copy.
+    // I do not have a good name for it yet.I called it truncated because
+    // the first selected line might be chopped from the start, and last - from the end.
+    pub fn pasteTruncated(self: *Buffer, register: []u8) !void {
+        var it = std.mem.splitScalar(u8, register, '\n');
+        var crow = self.rows.items[self.cy];
+        const before: []u8 = try self.allocator.dupe(u8, crow.*.content[0 .. self.cx + 1]);
+        const after: []u8 = try self.allocator.dupe(u8, crow.*.content[self.cx + 1 .. crow.content.len]);
+        defer self.allocator.free(before);
+        defer self.allocator.free(after);
+        var first_iter: bool = true;
+        while (it.next()) |line| {
+            if (first_iter) {
+                try crow.clear();
+                try crow.append(before);
+            }
+            try crow.update();
+            try crow.append(line);
+            if (it.peek()) |_| {
+                // We are here, if there is one more line to add.
+                try self.insertRow(self.cy + 1, "");
+                self.cy += 1;
+                crow = self.rows.items[self.cy];
+            } else {
+                try crow.append(after);
+            }
+            first_iter = false;
+        }
+    }
 };

@@ -1,7 +1,6 @@
+In normal mode, we can move to the row.len char. We should not.
 ---------
-add a debugging method to print to status line
----------
-Paste from internal registers.
+If we paste from visual mode at the last symbol of a line, we crash. 
 ---------
 Forward/backward search.
 ---------
@@ -28,5 +27,11 @@ add a check when adding a buffer that there is no buffer with this name, and eit
 Add :ls command.
 ---------
 Do not allow to move to the empty space at the end of a line in insert mode.
+---------
+implement visual paste: remove selected chunk and replace with the register content.
+---------
+When visual cutting ('x'), in vim, we get to the next elem after cursor. Unify.
+---------
+in vim, if we select the last element of a line, we cut out the \n symbol and join the next line with the current one. Make our select/x like that. 
 ---------
 
