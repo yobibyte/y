@@ -1,6 +1,5 @@
 const std = @import("std");
 
-//TODO: write from([]const u8) method.
 pub const String = struct {
     data: []u8,
     allocator: std.mem.Allocator,
@@ -16,10 +15,15 @@ pub const String = struct {
         return self;
     }
 
+    /// Clear the String content.
+    /// This does not free/reallocate the memory, only resets the length counter
+    /// so that memory is overwritten at next append().
     pub fn clear(self: *String) void {
         self.len = 0;
     }
 
+    /// Append a u8 slice to the String.
+    /// This copies the data.
     pub fn append(self: *String, other: []const u8) !void {
         const target_size = self.len + other.len;
         if (self.data.len < target_size) {
@@ -36,6 +40,13 @@ pub const String = struct {
             @memcpy(self.data[self.len..target_size], other);
         }
         self.len = target_size;
+    }
+
+    /// Initialise from a u8 slice.
+    pub fn from_slice(chars: []const u8, allocator: std.mem.Allocator) !*String {
+        var self = try String.init(chars.len, allocator);
+        try self.append(chars);
+        return self;
     }
 
     pub fn content(self: *String) []u8 {
@@ -73,9 +84,8 @@ test "append" {
 
 test "clear" {
     const allocator = std.testing.allocator;
-    const x = try String.init(2, allocator);
+    const x = try String.from_slice("42", allocator);
     defer x.deinit();
-    try x.append("42");
     x.clear();
     try std.testing.expect(x.len == 0);
     try std.testing.expect(std.mem.eql(u8, x.content(), ""));

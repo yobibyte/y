@@ -3,7 +3,6 @@
 # I got rid of the just dependency to simplify.
 # Using a bash script is enough for my purposes.
 
-# TODO: Figure out why this build crashes because of zon_mod.
 build() {
    zig build -Doptimize=ReleaseFast 
 }
