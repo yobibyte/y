@@ -72,8 +72,6 @@ pub const Row = struct {
     }
 
     pub fn insertChar(self: *Row, c: u8, at: usize) !void {
-        // I am not sure why the original tutorial used an int here.
-        // I will use a unsigned int here.
         const oldsize = self.content.len;
         var actual_at = at;
         if (at > oldsize) {
@@ -110,6 +108,12 @@ pub const Row = struct {
         std.mem.copyForwards(u8, new_content[self.content.len..], chunk);
         self.allocator.free(self.content);
         self.content = new_content;
+        try self.update();
+    }
+
+    pub fn clear(self: *Row) !void {
+        self.allocator.free(self.content);
+        self.content = try self.allocator.alloc(u8, 0);
         try self.update();
     }
 
