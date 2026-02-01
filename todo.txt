@@ -1,6 +1,5 @@
-In normal mode, we can move to the row.len char. We should not.
 ---------
-If we paste from visual mode at the last symbol of a line, we crash. 
+When visual cutting ('x'), in vim, we get to the next elem after cursor. Unify.
 ---------
 Forward/backward search.
 ---------
@@ -29,8 +28,6 @@ Add :ls command.
 Do not allow to move to the empty space at the end of a line in insert mode.
 ---------
 implement visual paste: remove selected chunk and replace with the register content.
----------
-When visual cutting ('x'), in vim, we get to the next elem after cursor. Unify.
 ---------
 in vim, if we select the last element of a line, we cut out the \n symbol and join the next line with the current one. Make our select/x like that. 
 ---------

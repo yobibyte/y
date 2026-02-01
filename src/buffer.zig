@@ -318,11 +318,23 @@ pub const Buffer = struct {
             kb.KEY_RIGHT => {
                 // Should we check -1 in insert here?
                 if (self.cy < self.len()) {
-                    if (self.cx < self.rows.items[self.cy].content.len) {
-                        self.cx += 1;
-                        if (mode == common.Mode.visual) {
-                            self.sel_end.x += 1;
-                        }
+                    switch (mode) {
+                        common.Mode.normal => {
+                            if (self.cx < self.rows.items[self.cy].content.len - 1) {
+                                self.cx += 1;
+                            }
+                        },
+                        common.Mode.visual => {
+                            if (self.cx < self.rows.items[self.cy].content.len) {
+                                self.cx += 1;
+                                self.sel_end.x += 1;
+                            }
+                        },
+                        common.Mode.insert => {
+                            if (self.cx < self.rows.items[self.cy].content.len) {
+                                self.cx += 1;
+                            }
+                        },
                     }
                 }
             },
