@@ -9,7 +9,10 @@ const std = @import("std");
 // . is any symbol.
 // $ end of a line.
 // --------WE ARE HERE------
+// \d any digit
 // * any number of a previous symbol.
+
+// TODO: add escape characters!
 
 pub fn match(regex: []const u8, text: []const u8) bool {
     // I consider empty regex non-matchable.
@@ -33,7 +36,7 @@ pub fn matchHere(regex: []const u8, text: []const u8) bool {
     if (regex[0] == '$' and regex.len == 1) {
         return text.len == 0;
     }
-    if (text.len > 0 and (regex[0] == '.' or regex[0] == text[0])) {
+    if (text.len > 0 and (regex[0] == '.' or regex[0] == text[0] or (regex[0] == '%' and std.ascii.isDigit(text[0])))) {
         return matchHere(regex[1..], text[1..]);
     }
     return false;
@@ -61,4 +64,16 @@ test "match_end_of_line" {
 
 test "no_match_end_of_line" {
     try std.testing.expect(!match("ab$", "abasdf"));
+}
+
+test "no_match_digit" {
+    try std.testing.expect(!match("a%b", "ab"));
+}
+
+test "match_digit" {
+    try std.testing.expect(match("a%b", "a2b"));
+}
+
+test "match_multi_digit" {
+    try std.testing.expect(match("a%%b", "a32b"));
 }
