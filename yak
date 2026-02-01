@@ -10,7 +10,7 @@ build() {
 
 case "$1" in
     build) build;;
-    debug) build;;
+    debug) zig build;;
     run) zig build run -- "${@:2}";;
     fmt) zig fmt src;;
     lines) find src/ -type f ! -name '*.swp' -exec wc -l {} +;;
